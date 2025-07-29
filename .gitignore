@@ -16,6 +16,7 @@ dist-ssr
 .vscode/*
 !.vscode/extensions.json
 .idea
+backend\.env
 .env
 .DS_Store
 *.suo
