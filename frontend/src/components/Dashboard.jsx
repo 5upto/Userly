@@ -4,6 +4,8 @@ import { userService } from '../services/api';
 import { toast } from 'react-toastify';
 import Toolbar from './Toolbar';
 import UserTable from './UserTable';
+import { Sparklines, SparklinesLine, SparklinesBars } from 'react-sparklines';
+import { format } from 'date-fns';
 
 const Dashboard = () => {
   const [users, setUsers] = useState([]);
@@ -170,34 +172,60 @@ const Dashboard = () => {
         </div>
       </div>
 
-
-      <div className="flex-1 overflow-hidden">
-        <div className="h-full p-6">
-          <div className="h-full">
-            <div className="bg-white shadow overflow-hidden rounded-lg h-full flex flex-col">
-              <Toolbar
-                selectedUsers={selectedUsers}
-                onBlock={handleBlock}
-                onUnblock={handleUnblock}
-                onDelete={handleDelete}
-                loading={actionLoading}
-              />
-
-              <div className="flex-1 overflow-auto">
-                <UserTable
-                  users={users}
-                  selectedUsers={selectedUsers}
-                  onSelectUser={handleSelectUser}
-                  onSelectAll={handleSelectAll}
-                  loading={loading}
-                />
+      <Toolbar 
+        onBlock={handleBlock}
+        onUnblock={handleUnblock}
+        onDelete={handleDelete}
+        selectedCount={selectedUsers.length}
+        loading={actionLoading}
+      />
+      <main className="flex-1 overflow-y-auto">
+        <div className="p-6 lg:px-8">
+          {/* Activity Overview */}
+          <div className="mb-6 bg-white shadow rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Activity Overview</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h3 className="text-sm font-medium text-gray-500">New Users</h3>
+                <div className="mt-2">
+                  <Sparklines data={[0, 4, 5, 3, 7, 8, 6, 9, 10, 12]} limit={10}>
+                    <SparklinesLine color="#4F46E5" style={{ strokeWidth: 2 }} />
+                  </Sparklines>
+                </div>
+                <p className="mt-2 text-sm text-gray-600">Last 7 days</p>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h3 className="text-sm font-medium text-gray-500">Active Users</h3>
+                <div className="mt-2">
+                  <Sparklines data={[20, 25, 30, 28, 35, 40, 38, 45, 50, 48]} limit={10}>
+                    <SparklinesLine color="#10B981" style={{ strokeWidth: 2 }} />
+                  </Sparklines>
+                </div>
+                <p className="mt-2 text-sm text-gray-600">Last 7 days</p>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h3 className="text-sm font-medium text-gray-500">User Actions</h3>
+                <div className="mt-2">
+                  <Sparklines data={[5, 8, 10, 12, 15, 18, 20, 22, 25, 28]} limit={10}>
+                    <SparklinesLine color="#F59E0B" style={{ strokeWidth: 2 }} />
+                  </Sparklines>
+                </div>
+                <p className="mt-2 text-sm text-gray-600">Last 7 days</p>
               </div>
             </div>
+          </div>
 
-
+          {/* User Table */}
+          <div className="bg-white shadow rounded-lg">
+            <UserTable
+              users={users}
+              selectedUsers={selectedUsers}
+              onSelectUser={handleSelectUser}
+              onSelectAll={handleSelectAll}
+            />
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 };
