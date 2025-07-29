@@ -73,7 +73,7 @@ RATE_LIMIT_MAX_REQUESTS=100
 
 ```bash
 cd backend
-npm run dev
+node server.js
 ```
 
 2. In a new terminal, start the frontend:
