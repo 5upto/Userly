@@ -104,7 +104,9 @@ user-management/
 │   │   ├── components/
 │   │   │   ├── Login.jsx
 │   │   │   ├── Register.jsx
+│   │   │   ├── ProtectedRoute.jsx
 │   │   │   ├── Dashboard.jsx
+│   │   │   ├── Usertable.jsx
 │   │   │   └── Toolbar.jsx
 │   │   ├── App.jsx
 │   │   └── main.jsx
@@ -119,6 +121,8 @@ user-management/
 - `Register.jsx`: Manages user registration
 - `Dashboard.jsx`: Displays user information and controls
 - `Toolbar.jsx`: Navigation and UI controls
+- `ProtectedRoute.jsx`: Route protection for authenticated routes
+- `Usertable.jsx`: User management table component
 
 ## Backend Features
 
