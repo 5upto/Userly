@@ -92,31 +92,59 @@ const Dashboard = () => {
     }
   };
 
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+
   const handleDelete = async () => {
     if (selectedUsers.length === 0) return;
+    setDeleteModalOpen(true);
+  };
 
-    if (window.confirm(`Are you sure you want to delete ${selectedUsers.length} user(s)? This action cannot be undone.`)) {
-      try {
-        setActionLoading(true);
-        await userService.deleteUsers(selectedUsers);
-        toast.success(`${selectedUsers.length} user(s) deleted successfully`);
-        setSelectedUsers([]);
-        await fetchUsers();
-      } catch (error) {
-        if (error.response?.data?.redirect) {
-          toast.error('Session expired. Please login again.');
-          logout();
-        } else {
-          toast.error('Failed to delete users');
-        }
-      } finally {
-        setActionLoading(false);
+  const handleConfirmDelete = async () => {
+    try {
+      setActionLoading(true);
+      await userService.deleteUsers(selectedUsers);
+      toast.success(`${selectedUsers.length} user(s) deleted successfully`);
+      setSelectedUsers([]);
+      await fetchUsers();
+      setDeleteModalOpen(false);
+    } catch (error) {
+      if (error.response?.data?.redirect) {
+        toast.error('Session expired. Please login again.');
+        logout();
+      } else {
+        toast.error('Failed to delete users');
       }
+    } finally {
+      setActionLoading(false);
     }
   };
 
   return (
     <div className="h-screen w-screen bg-gray-50 flex flex-col">
+      {deleteModalOpen && (
+        <div className="fixed inset-0 bg-black/10 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg w-96">
+            <h2 className="text-xl font-bold mb-4 text-gray-900">Confirm Delete</h2>
+            <p className="mb-4 text-gray-700">
+              Are you sure you want to delete {selectedUsers.length} user(s)? This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setDeleteModalOpen(false)}
+                className="px-4 py-2 bg-gray-300 text-gray-800 rounded hover:bg-gray-400 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="bg-white shadow">
         <div className="w-full px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
@@ -170,7 +198,6 @@ const Dashboard = () => {
         </div>
       </div>
 
-
       <div className="flex-1 overflow-hidden">
         <div className="h-full p-6">
           <div className="h-full">
@@ -193,7 +220,6 @@ const Dashboard = () => {
                 />
               </div>
             </div>
-
 
           </div>
         </div>

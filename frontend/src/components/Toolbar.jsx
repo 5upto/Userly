@@ -13,7 +13,6 @@ const Toolbar = ({ selectedUsers, onBlock, onUnblock, onDelete, loading }) => {
         </div>
         
         <div className="flex items-center space-x-2">
-          {/* Block Button */}
           <button
             onClick={onBlock}
             disabled={!hasSelection || loading}
@@ -25,7 +24,6 @@ const Toolbar = ({ selectedUsers, onBlock, onUnblock, onDelete, loading }) => {
             Block
           </button>
 
-          {/* Unblock Icon Button */}
           <button
             onClick={onUnblock}
             disabled={!hasSelection || loading}
@@ -37,7 +35,6 @@ const Toolbar = ({ selectedUsers, onBlock, onUnblock, onDelete, loading }) => {
             </svg>
           </button>
 
-          {/* Delete Icon Button */}
           <button
             onClick={onDelete}
             disabled={!hasSelection || loading}
