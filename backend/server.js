@@ -17,6 +17,7 @@ const limiter = rateLimit({
 
 app.use(limiter);
 app.use(cors());
+app.use(cors({ origin: 'https://userly-azai.vercel.app', credentials: true }));
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
