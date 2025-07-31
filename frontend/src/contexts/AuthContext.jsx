@@ -39,7 +39,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     try {
-      const response = await axios.post('/api/auth/login', { email, password });
+      const response = await axios.post('https://userly-xnjt-shawon-ghoshs-projects.vercel.app/auth/login', { email, password });
       const { token: newToken, user: userData } = response.data;
       
       setToken(newToken);
