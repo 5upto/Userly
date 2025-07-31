@@ -8,7 +8,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://userly-xnjt.vercel.app',
+        target: 'https://userly-xnjt-shawon-ghoshs-projects.vercel.app',
         changeOrigin: true,
         secure: false,
       },
