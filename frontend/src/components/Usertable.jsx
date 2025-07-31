@@ -75,7 +75,6 @@ const UserTable = ({ users, selectedUsers, onSelectUser, onSelectAll, loading })
                 key={user.id} 
                 className={`hover:bg-gray-50 ${selectedUsers.includes(user.id) ? 'bg-blue-50' : ''}`}
               >
-                {/* FOURTH REQUIREMENT: Selection checkbox without label */}
                 <td className="px-6 py-4 whitespace-nowrap">
                   <input
                     type="checkbox"
