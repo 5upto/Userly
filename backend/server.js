@@ -17,7 +17,7 @@ const limiter = rateLimit({
 
 app.use(limiter);
 app.use(cors());
-app.use(cors({ origin: 'https://userly-8i9n.vercel.app/', credentials: true }));
+app.use(cors({ origin: 'https://userly-pro.vercel.app'}));
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
