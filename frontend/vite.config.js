@@ -10,7 +10,7 @@ export default defineConfig({
       '/api': {
         target: 'https://userly-341i.onrender.com/',
         changeOrigin: true,
-        secure: false,
+        secure: true,
       },
     },
   },
