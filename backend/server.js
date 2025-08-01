@@ -16,9 +16,11 @@ const limiter = rateLimit({
 });
 
 app.use(limiter);
-app.use(cors());
-app.use(cors({ origin: 'https://userly-pro.vercel.app'}));
+app.use(cors({ origin: 'https://userly-pro.vercel.app' }));
 app.use(express.json());
+
+const path = require('path');
+app.use(express.static(path.join(__dirname, '../frontend/dist')));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -32,8 +34,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: 'Something went wrong!' });
 });
 
-app.use('*', (req, res) => {
-  res.status(404).json({ message: 'Route not found' });
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
 });
 
 const startServer = async () => {
