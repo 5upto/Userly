@@ -8,7 +8,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://userly-341i.onrender.com/',
+        target: 'https://userly-341i.onrender.com',
         changeOrigin: true,
         secure: true,
       },
