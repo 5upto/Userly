@@ -6,7 +6,7 @@ const router = express.Router();
 
 router.get('/', authenticateToken, async (req, res) => {
   try {
-    const [users] = await pool.execute(`
+    const { rows: users } = await pool.query(`
       SELECT 
         id, 
         name, 
@@ -34,10 +34,9 @@ router.patch('/block', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'User IDs are required' });
     }
 
-    const placeholders = userIds.map(() => '?').join(',');
-    await pool.execute(
-      `UPDATE users SET status = 'blocked' WHERE id IN (${placeholders})`,
-      userIds
+    await pool.query(
+      `UPDATE users SET status = 'blocked' WHERE id = ANY($1::int[])`,
+      [userIds]
     );
 
     res.json({ message: 'Users blocked successfully' });
@@ -55,10 +54,9 @@ router.patch('/unblock', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'User IDs are required' });
     }
 
-    const placeholders = userIds.map(() => '?').join(',');
-    await pool.execute(
-      `UPDATE users SET status = 'active' WHERE id IN (${placeholders})`,
-      userIds
+    await pool.query(
+      `UPDATE users SET status = 'active' WHERE id = ANY($1::int[])`,
+      [userIds]
     );
 
     res.json({ message: 'Users unblocked successfully' });
@@ -76,10 +74,9 @@ router.delete('/', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'User IDs are required' });
     }
 
-    const placeholders = userIds.map(() => '?').join(',');
-    await pool.execute(
-      `DELETE FROM users WHERE id IN (${placeholders})`,
-      userIds
+    await pool.query(
+      `DELETE FROM users WHERE id = ANY($1::int[])`,
+      [userIds]
     );
 
     res.json({ message: 'Users deleted successfully' });

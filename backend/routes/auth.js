@@ -13,8 +13,8 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'All fields are required' });
     }
 
-    const [existingUsers] = await pool.execute(
-      'SELECT id FROM users WHERE email = ?',
+    const { rows: existingUsers } = await pool.query(
+      'SELECT id FROM users WHERE email = $1',
       [email]
     );
 
@@ -24,8 +24,8 @@ router.post('/register', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    await pool.execute(
-      'INSERT INTO users (name, email, password) VALUES (?, ?, ?)',
+    await pool.query(
+      'INSERT INTO users (name, email, password) VALUES ($1, $2, $3)',
       [name, email, hashedPassword]
     );
 
@@ -44,8 +44,8 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    const [users] = await pool.execute(
-      'SELECT id, name, email, password, status FROM users WHERE email = ?',
+    const { rows: users } = await pool.query(
+      'SELECT id, name, email, password, status FROM users WHERE email = $1',
       [email]
     );
 
@@ -64,8 +64,8 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    await pool.execute(
-      'UPDATE users SET last_login_time = CURRENT_TIMESTAMP WHERE id = ?',
+    await pool.query(
+      'UPDATE users SET last_login_time = NOW() WHERE id = $1',
       [user.id]
     );
 
