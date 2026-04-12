@@ -30,7 +30,7 @@ const Login = () => {
 
   const handleSamlLogin = (configId) => {
     const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
-    window.location.href = `${apiBaseUrl}/api/saml/login/${configId}`;
+    window.location.href = `${apiBaseUrl}/saml/login/${configId}`;
   };
 
   const handleChange = (e) => {
