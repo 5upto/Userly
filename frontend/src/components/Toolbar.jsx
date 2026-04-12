@@ -1,6 +1,8 @@
 import React from 'react';
+import { useAuth } from '../contexts/AuthContext';
 
 const Toolbar = ({ selectedUsers, onBlock, onUnblock, onDelete, loading }) => {
+  const { user } = useAuth();
   const hasSelection = selectedUsers.length > 0;
 
   return (
@@ -35,16 +37,18 @@ const Toolbar = ({ selectedUsers, onBlock, onUnblock, onDelete, loading }) => {
             </svg>
           </button>
 
-          <button
-            onClick={onDelete}
-            disabled={!hasSelection || loading}
-            title="Delete"
-            className="inline-flex items-center p-2 border border-red-300 shadow-sm text-sm leading-4 font-medium rounded-md text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-          </button>
+          {user?.role === 'super_admin' && (
+            <button
+              onClick={onDelete}
+              disabled={!hasSelection || loading}
+              title="Delete"
+              className="inline-flex items-center p-2 border border-red-300 shadow-sm text-sm leading-4 font-medium rounded-md text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     </div>

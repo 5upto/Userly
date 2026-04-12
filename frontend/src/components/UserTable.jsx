@@ -19,6 +19,18 @@ const UserTable = ({ users, selectedUsers, onSelectUser, onSelectAll, loading })
     }
   };
 
+  const getRoleBadge = (role) => {
+    const baseClasses = "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium";
+    
+    if (role === 'super_admin') {
+      return `${baseClasses} bg-purple-100 text-purple-800`;
+    } else if (role === 'admin') {
+      return `${baseClasses} bg-blue-100 text-blue-800`;
+    } else {
+      return `${baseClasses} bg-gray-100 text-gray-800`;
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center py-12">
@@ -59,6 +71,9 @@ const UserTable = ({ users, selectedUsers, onSelectUser, onSelectAll, loading })
               Registration Time
             </th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Role
+            </th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Status
             </th>
           </tr>
@@ -66,7 +81,7 @@ const UserTable = ({ users, selectedUsers, onSelectUser, onSelectAll, loading })
         <tbody className="bg-white divide-y divide-gray-200">
           {users.length === 0 ? (
             <tr>
-              <td colSpan="6" className="px-6 py-4 text-center text-gray-500">
+              <td colSpan="7" className="px-6 py-4 text-center text-gray-500">
                 No users found
               </td>
             </tr>
@@ -96,6 +111,11 @@ const UserTable = ({ users, selectedUsers, onSelectUser, onSelectAll, loading })
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {formatDateTime(user.registration_time)}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <span className={getRoleBadge(user.role)}>
+                    {user.role?.replace('_', ' ') || 'user'}
+                  </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className={getStatusBadge(user.status)}>

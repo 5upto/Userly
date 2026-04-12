@@ -1,6 +1,6 @@
 const express = require('express');
 const { pool } = require('../config/database');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, requireAdmin, requireSuperAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -11,7 +11,8 @@ router.get('/', authenticateToken, async (req, res) => {
         id, 
         name, 
         email, 
-        status, 
+        status,
+        role,
         registration_time, 
         last_login_time,
         COALESCE(last_login_time, registration_time) as activity_time
@@ -26,7 +27,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-router.patch('/block', authenticateToken, async (req, res) => {
+router.patch('/block', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { userIds } = req.body;
 
@@ -46,7 +47,7 @@ router.patch('/block', authenticateToken, async (req, res) => {
   }
 });
 
-router.patch('/unblock', authenticateToken, async (req, res) => {
+router.patch('/unblock', authenticateToken, requireAdmin, async (req, res) => {
   try {
     const { userIds } = req.body;
 
@@ -66,12 +67,17 @@ router.patch('/unblock', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/', authenticateToken, async (req, res) => {
+router.delete('/', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { userIds } = req.body;
 
     if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
       return res.status(400).json({ message: 'User IDs are required' });
+    }
+
+    // Prevent deleting yourself
+    if (userIds.includes(req.user.id)) {
+      return res.status(400).json({ message: 'Cannot delete yourself' });
     }
 
     await pool.query(
@@ -82,6 +88,37 @@ router.delete('/', authenticateToken, async (req, res) => {
     res.json({ message: 'Users deleted successfully' });
   } catch (error) {
     console.error('Error deleting users:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Update user role (Super Admin only)
+router.patch('/:id/role', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body;
+
+    if (!role || !['user', 'admin', 'super_admin'].includes(role)) {
+      return res.status(400).json({ message: 'Valid role is required (user, admin, super_admin)' });
+    }
+
+    // Prevent changing your own role
+    if (parseInt(id) === req.user.id) {
+      return res.status(400).json({ message: 'Cannot change your own role' });
+    }
+
+    const { rows } = await pool.query(
+      'UPDATE users SET role = $1 WHERE id = $2 RETURNING id, name, email, role',
+      [role, id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json({ message: 'User role updated successfully', user: rows[0] });
+  } catch (error) {
+    console.error('Error updating user role:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

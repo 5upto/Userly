@@ -8,6 +8,7 @@ const passport = require('passport');
 const SamlStrategy = require('passport-saml').Strategy;
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
+const { requireAdmin } = require('../middleware/auth');
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../uploads');
@@ -150,7 +151,7 @@ const authenticateToken = (req, res, next) => {
 };
 
 // Get all SAML configurations
-router.get('/configs', authenticateToken, (req, res) => {
+router.get('/configs', requireAdmin, (req, res) => {
   res.json(samlConfigs);
 });
 
@@ -177,7 +178,7 @@ router.options('/acs', (req, res) => {
 });
 
 // Create or update SAML configuration
-router.post('/config', authenticateToken, upload.single('metadataFile'), async (req, res) => {
+router.post('/config', requireAdmin, upload.single('metadataFile'), async (req, res) => {
   try {
     console.log('SAML config save request received');
     console.log('Request body keys:', Object.keys(req.body));
@@ -265,14 +266,14 @@ router.post('/config', authenticateToken, upload.single('metadataFile'), async (
 });
 
 // Delete SAML configuration
-router.delete('/config/:id', authenticateToken, (req, res) => {
+router.delete('/config/:id', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id);
   samlConfigs = samlConfigs.filter(config => config.id !== id);
   res.json({ message: 'Configuration deleted successfully' });
 });
 
 // Generate SAML metadata for service provider
-router.get('/metadata/:id', authenticateToken, (req, res) => {
+router.get('/metadata/:id', (req, res) => {
   const config = samlConfigs.find(c => c.id === parseInt(req.params.id));
   
   if (!config) {

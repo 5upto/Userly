@@ -30,7 +30,9 @@ export const userService = {
   
   unblockUsers: (userIds) => api.patch('/users/unblock', { userIds }),
   
-  deleteUsers: (userIds) => api.delete('/users', { data: { userIds } })
+  deleteUsers: (userIds) => api.delete('/users', { data: { userIds } }),
+  
+  updateUserRole: (userId, role) => api.patch(`/users/${userId}/role`, { role })
 };
 
 export default api;

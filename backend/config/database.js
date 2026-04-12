@@ -16,6 +16,7 @@ const initDatabase = async () => {
         email VARCHAR(255) NOT NULL,
         password VARCHAR(255) NOT NULL,
         status TEXT CHECK (status IN ('active','blocked')) DEFAULT 'active',
+        role TEXT CHECK (role IN ('user','admin','super_admin')) DEFAULT 'user',
         registration_time TIMESTAMPTZ DEFAULT NOW(),
         last_login_time TIMESTAMPTZ NULL,
         created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -39,6 +40,19 @@ const initDatabase = async () => {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
+    `);
+
+    // Migration: Add role column if it doesn't exist (for existing tables)
+    await client.query(`
+      ALTER TABLE users 
+      ADD COLUMN IF NOT EXISTS role TEXT CHECK (role IN ('user','admin','super_admin')) DEFAULT 'user'
+    `);
+
+    // Set supto.shawon2002@gmail.com as Super Admin
+    await client.query(`
+      UPDATE users 
+      SET role = 'super_admin' 
+      WHERE email = 'supto.shawon2002@gmail.com'
     `);
 
     console.log('Tables created successfully');
