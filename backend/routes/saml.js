@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
-const { Saml } = require('@node-saml/node-saml');
+const Saml = require('@node-saml/node-saml');
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../uploads');
