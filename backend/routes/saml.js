@@ -284,8 +284,22 @@ router.post('/acs', (req, res, next) => {
   console.log('Using strategy:', strategyName);
   
   passport.authenticate(strategyName, { 
-    failureRedirect: 'https://userly-pro.vercel.app/login',
+    failureRedirect: 'https://userly-pro.vercel.app/login?error=auth_failed',
+    failureFlash: true,
     session: false 
+  }, (err, user, info) => {
+    if (err) {
+      console.error('Passport authentication error:', err);
+      return res.redirect('https://userly-pro.vercel.app/login?error=passport_error');
+    }
+    if (!user) {
+      console.error('No user returned from passport:', info);
+      return res.redirect('https://userly-pro.vercel.app/login?error=no_user');
+    }
+    
+    // Attach user to request for the next handler
+    req.user = user;
+    next();
   })(req, res, next);
 }, async (req, res) => {
   try {
@@ -305,7 +319,7 @@ router.post('/acs', (req, res, next) => {
     res.redirect(redirectUrl);
   } catch (error) {
     console.error('SAML ACS callback error:', error);
-    res.redirect('https://userly-pro.vercel.app/login?error=saml_failed');
+    res.redirect('https://userly-pro.vercel.app/login?error=token_generation_failed');
   }
 });
 
