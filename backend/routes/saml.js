@@ -41,7 +41,7 @@ const getSamlStrategy = (config) => {
       entryPoint: config.idp_sso_url,
       issuer: `userly-${config.id}`,
       cert: config.idp_certificate,
-      callbackUrl: 'https://userly-pro.vercel.app/api/saml/acs',
+      callbackUrl: 'https://userly-341i.onrender.com/api/saml/acs',
       identifierFormat: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
       passReqToCallback: true
     },
@@ -206,8 +206,8 @@ router.get('/metadata/:id', authenticateToken, (req, res) => {
   }
 
   const appId = `userly-${config.id}`;
-  const acsUrl = 'https://userly-pro.vercel.app/api/saml/acs';
-  const sloUrl = 'https://userly-pro.vercel.app/api/saml/slo';
+  const acsUrl = 'https://userly-341i.onrender.com/api/saml/acs';
+  const sloUrl = 'https://userly-341i.onrender.com/api/saml/slo';
 
   const metadata = `<?xml version="1.0" encoding="UTF-8"?>
 <md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="${appId}">

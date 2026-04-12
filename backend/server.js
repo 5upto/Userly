@@ -18,17 +18,18 @@ const limiter = rateLimit({
 });
 
 app.use(limiter);
-app.use(cors({ origin: 'https://userly-pro.vercel.app' }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(passport.initialize());
 
-// Allow CORS for SAML routes (IdP posts from its own domain)
+// Allow CORS for SAML routes (IdP posts from its own domain) - must be before global CORS
 app.use('/api/saml', cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type']
 }));
+
+app.use(cors({ origin: 'https://userly-pro.vercel.app' }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(passport.initialize());
 
 // Allow SAML ACS endpoint to be loaded from frames and accept CORS from any origin (required for SAML POST binding from IdP)
 app.use((req, res, next) => {

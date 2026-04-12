@@ -366,7 +366,7 @@ const SamlConfig = () => {
                 <h3 className="font-medium text-gray-900">Step 3: Configure Reply URL</h3>
                 <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600 ml-4">
                   <li>In Basic SAML Configuration, set Reply URL (Assertion Consumer Service URL) to:</li>
-                  <li className="font-mono text-xs bg-gray-100 p-2 rounded">https://userly-pro.vercel.app/api/saml/acs</li>
+                  <li className="font-mono text-xs bg-gray-100 p-2 rounded">https://userly-341i.onrender.com/api/saml/acs</li>
                 </ol>
               </div>
 
