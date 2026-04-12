@@ -271,17 +271,19 @@ router.post('/acs', (req, res, next) => {
   console.log('Request body keys:', Object.keys(req.body));
   console.log('SAMLResponse present:', !!req.body.SAMLResponse);
   console.log('RelayState:', req.body.RelayState);
+  console.log('Available SAML configs:', samlConfigs.length);
   
   // Use the first available config for authentication
   if (samlConfigs.length === 0) {
-    console.error('No SAML configuration found');
-    return res.status(400).json({ message: 'No SAML configuration found' });
+    console.error('No SAML configuration found - configs may have been lost on server restart');
+    return res.redirect('https://userly-pro.vercel.app/login?error=no_saml_config');
   }
   
   const config = samlConfigs[0];
   const strategyName = `saml-${config.id}`;
   
   console.log('Using strategy:', strategyName);
+  console.log('Config details:', { id: config.id, name: config.saml_name, ssoUrl: config.idp_sso_url });
   
   passport.authenticate(strategyName, { 
     failureRedirect: 'https://userly-pro.vercel.app/login?error=auth_failed',
@@ -290,6 +292,7 @@ router.post('/acs', (req, res, next) => {
   }, (err, user, info) => {
     if (err) {
       console.error('Passport authentication error:', err);
+      console.error('Error details:', JSON.stringify(err, null, 2));
       return res.redirect('https://userly-pro.vercel.app/login?error=passport_error');
     }
     if (!user) {
@@ -319,6 +322,7 @@ router.post('/acs', (req, res, next) => {
     res.redirect(redirectUrl);
   } catch (error) {
     console.error('SAML ACS callback error:', error);
+    console.error('Error stack:', error.stack);
     res.redirect('https://userly-pro.vercel.app/login?error=token_generation_failed');
   }
 });
