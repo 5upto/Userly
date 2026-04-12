@@ -8,7 +8,7 @@ const passport = require('passport');
 const SamlStrategy = require('passport-saml').Strategy;
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
-const { requireAdmin } = require('../middleware/auth');
+const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../uploads');
@@ -132,26 +132,8 @@ const getSamlStrategy = (config) => {
   return strategy;
 };
 
-// Middleware to verify JWT token
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ message: 'Access token required' });
-  }
-
-  jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key', (err, user) => {
-    if (err) {
-      return res.status(403).json({ message: 'Invalid or expired token' });
-    }
-    req.user = user;
-    next();
-  });
-};
-
 // Get all SAML configurations
-router.get('/configs', requireAdmin, (req, res) => {
+router.get('/configs', authenticateToken, requireAdmin, (req, res) => {
   res.json(samlConfigs);
 });
 
@@ -178,7 +160,7 @@ router.options('/acs', (req, res) => {
 });
 
 // Create or update SAML configuration
-router.post('/config', requireAdmin, upload.single('metadataFile'), async (req, res) => {
+router.post('/config', authenticateToken, requireAdmin, upload.single('metadataFile'), async (req, res) => {
   try {
     console.log('SAML config save request received');
     console.log('Request body keys:', Object.keys(req.body));
@@ -266,7 +248,7 @@ router.post('/config', requireAdmin, upload.single('metadataFile'), async (req, 
 });
 
 // Delete SAML configuration
-router.delete('/config/:id', requireAdmin, async (req, res) => {
+router.delete('/config/:id', authenticateToken, requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
   
   // Remove from database

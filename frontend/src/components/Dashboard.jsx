@@ -225,9 +225,9 @@ const Dashboard = () => {
               </svg>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">Userly</h1>
-                <p1 className="text-sm text-gray-600">
+                <p className="text-sm text-gray-600">
                   Welcome back, {user?.name}
-                </p1>
+                </p>
               </div>
             </div>
 
