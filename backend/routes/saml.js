@@ -4,6 +4,10 @@ const multer = require('multer');
 const xml2js = require('xml2js');
 const fs = require('fs');
 const path = require('path');
+const passport = require('passport');
+const SamlStrategy = require('passport-saml').Strategy;
+const jwt = require('jsonwebtoken');
+const { pool } = require('../config/database');
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../uploads');
@@ -20,6 +24,68 @@ const upload = multer({
 // In-memory storage for SAML configurations (in production, use a database)
 let samlConfigs = [];
 
+// Store strategies by config ID
+const strategies = {};
+
+// Function to create or retrieve SAML strategy for a given config
+const getSamlStrategy = (config) => {
+  if (strategies[config.id]) {
+    return strategies[config.id];
+  }
+
+  const strategy = new SamlStrategy(
+    {
+      entryPoint: config.idp_sso_url,
+      issuer: `userly-${config.id}`,
+      cert: config.idp_certificate,
+      callbackUrl: 'https://userly-pro.vercel.app/api/saml/acs',
+      identifierFormat: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
+      passReqToCallback: true
+    },
+    async (req, profile, done) => {
+      try {
+        // Extract user information from SAML profile
+        const email = profile.nameID || profile.email;
+        const name = profile.displayName || profile.name || email.split('@')[0];
+        
+        // Check if user exists
+        const { rows: existingUsers } = await pool.query(
+          'SELECT id, email, name, status FROM users WHERE email = $1',
+          [email]
+        );
+
+        let user;
+        if (existingUsers.length === 0) {
+          // Create new user
+          const { rows: newUsers } = await pool.query(
+            'INSERT INTO users (name, email, password, created_at, last_login_time) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, email, name, status',
+            [name, email, ''] // Empty password for SAML users
+          );
+          user = newUsers[0];
+        } else {
+          // Update existing user's last login time
+          user = existingUsers[0];
+          if (user.status === 'blocked') {
+            return done(new Error('Account is blocked'), null);
+          }
+          await pool.query(
+            'UPDATE users SET last_login_time = NOW() WHERE id = $1',
+            [user.id]
+          );
+        }
+
+        done(null, user);
+      } catch (error) {
+        console.error('SAML profile processing error:', error);
+        done(error, null);
+      }
+    }
+  );
+
+  strategies[config.id] = strategy;
+  return strategy;
+};
+
 // Middleware to verify JWT token
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -29,7 +95,6 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ message: 'Access token required' });
   }
 
-  const jwt = require('jsonwebtoken');
   jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key', (err, user) => {
     if (err) {
       return res.status(403).json({ message: 'Invalid or expired token' });
@@ -133,13 +198,84 @@ router.get('/metadata/:id', authenticateToken, (req, res) => {
 });
 
 // SAML ACS (Assertion Consumer Service) endpoint
-router.post('/acs', express.urlencoded({ extended: true }), (req, res) => {
-  const SAMLResponse = req.body.SAMLResponse;
-  // In a real implementation, you would validate the SAML response here
-  // using passport-saml or similar library
-  
-  console.log('Received SAML Response');
-  res.send('SAML ACS endpoint - Response received');
+router.post('/acs', express.urlencoded({ extended: true }), async (req, res) => {
+  try {
+    const SAMLResponse = req.body.SAMLResponse;
+    const RelayState = req.body.RelayState;
+
+    if (!SAMLResponse) {
+      return res.status(400).json({ message: 'SAMLResponse is required' });
+    }
+
+    // Find the SAML config that matches this response
+    // In production, you might need to identify the config based on the issuer or other metadata
+    if (samlConfigs.length === 0) {
+      return res.status(400).json({ message: 'No SAML configuration found' });
+    }
+
+    // Use the first config (in production, you'd need to match the correct config)
+    const config = samlConfigs[0];
+    const strategy = getSamlStrategy(config);
+
+    // Manually validate the SAML response
+    const { profile } = await new Promise((resolve, reject) => {
+      strategy._validatePostResponse(req.body, (err, profile) => {
+        if (err) reject(err);
+        else resolve({ profile });
+      });
+    });
+
+    // Extract user information from SAML profile
+    const email = profile.nameID || profile.email;
+    const name = profile.displayName || profile.name || email.split('@')[0];
+
+    // Check if user exists
+    const { rows: existingUsers } = await pool.query(
+      'SELECT id, email, name, status FROM users WHERE email = $1',
+      [email]
+    );
+
+    let user;
+    if (existingUsers.length === 0) {
+      // Create new user
+      const { rows: newUsers } = await pool.query(
+        'INSERT INTO users (name, email, password, created_at, last_login_time) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, email, name, status',
+        [name, email, ''] // Empty password for SAML users
+      );
+      user = newUsers[0];
+    } else {
+      // Update existing user's last login time
+      user = existingUsers[0];
+      if (user.status === 'blocked') {
+        return res.status(403).json({ message: 'Account is blocked' });
+      }
+      await pool.query(
+        'UPDATE users SET last_login_time = NOW() WHERE id = $1',
+        [user.id]
+      );
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: '24h' }
+    );
+
+    // Redirect to frontend with token
+    const frontendUrl = 'https://userly-pro.vercel.app';
+    const redirectUrl = RelayState || `${frontendUrl}/auth/callback?token=${token}`;
+    
+    // If RelayState is provided, append the token as query param
+    const finalRedirectUrl = redirectUrl.includes('?') 
+      ? `${redirectUrl}&token=${token}`
+      : `${redirectUrl}?token=${token}`;
+
+    res.redirect(finalRedirectUrl);
+  } catch (error) {
+    console.error('SAML ACS error:', error);
+    res.status(500).json({ message: 'SAML authentication failed', error: error.message });
+  }
 });
 
 // SAML SLO (Single Logout) endpoint

@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const passport = require('passport');
 require('dotenv').config();
 
 const { initDatabase } = require('./config/database');
@@ -9,7 +10,7 @@ const userRoutes = require('./routes/users');
 const samlRoutes = require('./routes/saml');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -20,6 +21,7 @@ app.use(limiter);
 app.use(cors({ origin: 'https://userly-pro.vercel.app' }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(passport.initialize());
 
 const path = require('path');
 app.use(express.static(path.join(__dirname, '../frontend/dist')));
