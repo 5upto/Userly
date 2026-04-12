@@ -132,9 +132,20 @@ const getSamlStrategy = (config) => {
   return strategy;
 };
 
-// Get all SAML configurations
+// Get all SAML configurations (Admin only)
 router.get('/configs', authenticateToken, requireAdmin, (req, res) => {
   res.json(samlConfigs);
+});
+
+// Get SAML providers for login page (public, no auth required)
+router.get('/providers', (req, res) => {
+  // Return minimal info needed for login page
+  const providers = samlConfigs.map(c => ({
+    id: c.id,
+    saml_name: c.saml_name,
+    allowed_domains: c.allowed_domains
+  }));
+  res.json(providers);
 });
 
 // Diagnostic endpoint to check SAML status (no auth required for debugging)

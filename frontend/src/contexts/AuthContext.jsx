@@ -13,7 +13,7 @@ export const AuthProvider = ({ children }) => {
     // Fetch SAML config to get the ID for automatic login
     const fetchSamlConfig = async () => {
       try {
-        const response = await fetch('https://userly-341i.onrender.com/api/saml/configs');
+        const response = await fetch('https://userly-341i.onrender.com/api/saml/providers');
         const data = await response.json();
         if (data && data.length > 0) {
           setSamlConfigId(data[0].id);

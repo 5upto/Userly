@@ -21,7 +21,7 @@ const Login = () => {
 
   const fetchSamlConfigs = async () => {
     try {
-      const response = await api.get('/saml/configs');
+      const response = await api.get('/saml/providers');
       setSamlConfigs(response.data);
     } catch (error) {
       // Ignore error if no SAML configs exist
