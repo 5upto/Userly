@@ -27,6 +27,20 @@ const initDatabase = async () => {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)
     `);
 
+    // Create SAML configs table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS saml_configs (
+        id BIGINT PRIMARY KEY,
+        saml_name VARCHAR(255) NOT NULL,
+        allowed_domains TEXT,
+        issuer_url TEXT,
+        idp_sso_url TEXT NOT NULL,
+        idp_certificate TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
     console.log('Tables created successfully');
   } catch (error) {
     console.error('Error initializing database:', error);
