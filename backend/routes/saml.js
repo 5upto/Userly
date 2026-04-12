@@ -92,7 +92,7 @@ const getSamlStrategy = (config) => {
         
         // Check if user exists
         const { rows: existingUsers } = await pool.query(
-          'SELECT id, email, name, status FROM users WHERE email = $1',
+          'SELECT id, email, name, status, role FROM users WHERE email = $1',
           [email]
         );
 
@@ -100,8 +100,8 @@ const getSamlStrategy = (config) => {
         if (existingUsers.length === 0) {
           // Create new user
           const { rows: newUsers } = await pool.query(
-            'INSERT INTO users (name, email, password, created_at, last_login_time) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, email, name, status',
-            [name, email, ''] // Empty password for SAML users
+            'INSERT INTO users (name, email, password, role, created_at, last_login_time) VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING id, email, name, status, role',
+            [name, email, '', 'standard'] // Empty password for SAML users, default role
           );
           user = newUsers[0];
         } else {
@@ -394,7 +394,7 @@ async function handleSamlUser(profile, res) {
 
     // Check if user exists
     const { rows: existingUsers } = await pool.query(
-      'SELECT id, email, name, status FROM users WHERE email = $1',
+      'SELECT id, email, name, status, role FROM users WHERE email = $1',
       [email]
     );
 
@@ -405,8 +405,8 @@ async function handleSamlUser(profile, res) {
       // Create new user
       console.log('Creating new user...');
       const { rows: newUsers } = await pool.query(
-        'INSERT INTO users (name, email, password, created_at, last_login_time) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, email, name, status',
-        [name, email, ''] // Empty password for SAML users
+        'INSERT INTO users (name, email, password, role, created_at, last_login_time) VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING id, email, name, status, role',
+        [name, email, '', 'standard'] // Empty password for SAML users, default role
       );
       user = newUsers[0];
       console.log('User created successfully:', user.id);
@@ -427,7 +427,7 @@ async function handleSamlUser(profile, res) {
     // Generate JWT token
     console.log('Generating JWT token...');
     const token = jwt.sign(
-      { userId: user.id, email: user.email, name: user.name },
+      { userId: user.id, email: user.email, name: user.name, role: user.role || 'standard' },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }
     );
