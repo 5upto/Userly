@@ -23,6 +23,13 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
 
+// Allow CORS for SAML routes (IdP posts from its own domain)
+app.use('/api/saml', cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type']
+}));
+
 // Allow SAML ACS endpoint to be loaded from frames and accept CORS from any origin (required for SAML POST binding from IdP)
 app.use((req, res, next) => {
   if (req.path === '/api/saml/acs') {
