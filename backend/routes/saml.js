@@ -227,31 +227,51 @@ router.get('/login/:id', async (req, res) => {
   }
 });
 
-// SAML ACS (Assertion Consumer Service) endpoint
+// SAML ACS (Assertion Consumer Service) endpoint - GET handler for direct visits
+router.get('/acs', (req, res) => {
+  res.redirect('https://userly-pro.vercel.app/login');
+});
+
+// SAML ACS (Assertion Consumer Service) endpoint - POST handler for SAML responses
 router.post('/acs', express.urlencoded({ extended: true }), async (req, res) => {
   try {
+    console.log('SAML ACS received POST request');
     const SAMLResponse = req.body.SAMLResponse;
     const RelayState = req.body.RelayState;
 
+    console.log('SAMLResponse present:', !!SAMLResponse);
+    console.log('RelayState:', RelayState);
+
     if (!SAMLResponse) {
+      console.error('SAMLResponse missing from request');
       return res.status(400).json({ message: 'SAMLResponse is required' });
     }
 
     // Find the SAML config that matches this response
     // In production, you might need to identify the config based on the issuer or other metadata
+    console.log('Available SAML configs:', samlConfigs.length);
     if (samlConfigs.length === 0) {
+      console.error('No SAML configuration found');
       return res.status(400).json({ message: 'No SAML configuration found' });
     }
 
     // Use the first config (in production, you'd need to match the correct config)
     const config = samlConfigs[0];
+    console.log('Using SAML config:', config.id, config.saml_name);
     const strategy = getSamlStrategy(config);
 
     // Manually validate the SAML response
+    console.log('Validating SAML response...');
     const { profile } = await new Promise((resolve, reject) => {
       strategy._validatePostResponse(req.body, (err, profile) => {
-        if (err) reject(err);
-        else resolve({ profile });
+        if (err) {
+          console.error('SAML validation error:', err);
+          reject(err);
+        }
+        else {
+          console.log('SAML validation successful, profile:', profile);
+          resolve({ profile });
+        }
       });
     });
 
@@ -259,24 +279,32 @@ router.post('/acs', express.urlencoded({ extended: true }), async (req, res) => 
     const email = profile.nameID || profile.email;
     const name = profile.displayName || profile.name || email.split('@')[0];
 
+    console.log('Extracted user info - email:', email, 'name:', name);
+
     // Check if user exists
     const { rows: existingUsers } = await pool.query(
       'SELECT id, email, name, status FROM users WHERE email = $1',
       [email]
     );
 
+    console.log('Existing users found:', existingUsers.length);
+
     let user;
     if (existingUsers.length === 0) {
       // Create new user
+      console.log('Creating new user...');
       const { rows: newUsers } = await pool.query(
         'INSERT INTO users (name, email, password, created_at, last_login_time) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, email, name, status',
         [name, email, ''] // Empty password for SAML users
       );
       user = newUsers[0];
+      console.log('User created successfully:', user.id);
     } else {
       // Update existing user's last login time
       user = existingUsers[0];
+      console.log('Existing user found:', user.id, 'status:', user.status);
       if (user.status === 'blocked') {
+        console.error('Account is blocked');
         return res.status(403).json({ message: 'Account is blocked' });
       }
       await pool.query(
@@ -286,11 +314,14 @@ router.post('/acs', express.urlencoded({ extended: true }), async (req, res) => 
     }
 
     // Generate JWT token
+    console.log('Generating JWT token...');
     const token = jwt.sign(
       { userId: user.id, email: user.email },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }
     );
+
+    console.log('JWT token generated successfully');
 
     // Redirect to frontend with token
     const frontendUrl = 'https://userly-pro.vercel.app';
@@ -301,6 +332,7 @@ router.post('/acs', express.urlencoded({ extended: true }), async (req, res) => 
       ? `${redirectUrl}&token=${token}`
       : `${redirectUrl}?token=${token}`;
 
+    console.log('Redirecting to:', finalRedirectUrl);
     res.redirect(finalRedirectUrl);
   } catch (error) {
     console.error('SAML ACS error:', error);
