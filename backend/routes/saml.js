@@ -113,6 +113,15 @@ router.get('/configs', authenticateToken, (req, res) => {
   res.json(samlConfigs);
 });
 
+// Diagnostic endpoint to check SAML status (no auth required for debugging)
+router.get('/status', (req, res) => {
+  res.json({
+    configsCount: samlConfigs.length,
+    configs: samlConfigs.map(c => ({ id: c.id, name: c.saml_name, ssoUrl: c.idp_sso_url })),
+    strategiesRegistered: Object.keys(strategies).length
+  });
+});
+
 // Create or update SAML configuration
 router.post('/config', authenticateToken, upload.single('metadataFile'), async (req, res) => {
   try {
@@ -203,262 +212,71 @@ router.get('/metadata/:id', authenticateToken, (req, res) => {
 });
 
 // SAML login initiation endpoint
-router.get('/login/:id', async (req, res) => {
-  try {
-    const config = samlConfigs.find(c => c.id === parseInt(req.params.id));
-    
-    if (!config) {
-      return res.status(404).json({ message: 'SAML configuration not found' });
-    }
-
-    const strategy = getSamlStrategy(config);
-    
-    // Set RelayState to redirect back to frontend after authentication
-    const relayState = 'https://userly-pro.vercel.app/auth/callback';
-    
-    console.log('Generating SAML request for config:', config.id, config.saml_name);
-    console.log('IdP SSO URL:', config.idp_sso_url);
-    
-    // Generate SAML request using the strategy's internal method
-    strategy._generateAuthorizeRequest(
-      req,
-      (err, requestUrl) => {
-        if (err) {
-          console.error('Error generating SAML request:', err);
-          return res.status(500).json({ message: 'Failed to generate SAML request', error: err.message });
-        }
-        
-        console.log('Generated SAML request URL:', requestUrl);
-        
-        // Append RelayState to the URL
-        const separator = requestUrl.includes('?') ? '&' : '?';
-        const finalUrl = `${requestUrl}${separator}RelayState=${encodeURIComponent(relayState)}`;
-        
-        console.log('Redirecting to IdP with RelayState:', finalUrl);
-        res.redirect(finalUrl);
-      },
-      relayState
-    );
-  } catch (error) {
-    console.error('SAML login initiation error:', error);
-    res.status(500).json({ message: 'SAML login initiation failed', error: error.message });
+router.get('/login/:id', (req, res, next) => {
+  const config = samlConfigs.find(c => c.id === parseInt(req.params.id));
+  
+  if (!config) {
+    return res.status(404).json({ message: 'SAML configuration not found' });
   }
+
+  const strategyName = `saml-${config.id}`;
+  
+  console.log('Initiating SAML login for config:', config.id, config.saml_name);
+  console.log('Strategy name:', strategyName);
+  console.log('IdP SSO URL:', config.idp_sso_url);
+  
+  // Use standard passport-saml authentication
+  passport.authenticate(strategyName, {
+    additionalParams: {
+      RelayState: 'https://userly-pro.vercel.app/auth/callback'
+    }
+  })(req, res, next);
 });
 
-// SAML ACS (Assertion Consumer Service) endpoint - GET handler for HTTP-Redirect binding
-router.get('/acs', async (req, res) => {
+// SAML ACS (Assertion Consumer Service) endpoint - handles POST (HTTP-POST binding)
+router.post('/acs', (req, res, next) => {
+  console.log('SAML ACS received POST request');
+  
+  // Use the first available config for authentication
+  if (samlConfigs.length === 0) {
+    console.error('No SAML configuration found');
+    return res.status(400).json({ message: 'No SAML configuration found' });
+  }
+  
+  const config = samlConfigs[0];
+  const strategyName = `saml-${config.id}`;
+  
+  console.log('Using strategy:', strategyName);
+  
+  passport.authenticate(strategyName, { 
+    failureRedirect: 'https://userly-pro.vercel.app/login',
+    session: false 
+  })(req, res, next);
+}, async (req, res) => {
   try {
-    const SAMLResponse = req.query.SAMLResponse;
-    const RelayState = req.query.RelayState;
-
-    console.log('SAML ACS received GET request (HTTP-Redirect binding)');
-    console.log('SAMLResponse present:', !!SAMLResponse);
-    console.log('RelayState:', RelayState);
-
-    // If no SAMLResponse, redirect to login (direct visit)
-    if (!SAMLResponse) {
-      console.log('No SAMLResponse, redirecting to login');
-      return res.redirect('https://userly-pro.vercel.app/login');
-    }
-
-    // Find the SAML config that matches this response
-    console.log('Available SAML configs:', samlConfigs.length);
-    if (samlConfigs.length === 0) {
-      console.error('No SAML configuration found');
-      return res.status(400).json({ message: 'No SAML configuration found' });
-    }
-
-    // Use the first config (in production, you'd need to match the correct config)
-    const config = samlConfigs[0];
-    console.log('Using SAML config:', config.id, config.saml_name);
-    const strategy = getSamlStrategy(config);
-
-    // Manually validate the SAML response (for HTTP-Redirect binding, response is base64 encoded in query param)
-    console.log('Validating SAML response (HTTP-Redirect binding)...');
-    const { profile } = await new Promise((resolve, reject) => {
-      strategy._validateRedirectResponse(req.query, (err, profile) => {
-        if (err) {
-          console.error('SAML validation error:', err);
-          reject(err);
-        }
-        else {
-          console.log('SAML validation successful, profile:', profile);
-          resolve({ profile });
-        }
-      });
-    });
-
-    // Extract user information from SAML profile
-    const email = profile.nameID || profile.email;
-    const name = profile.displayName || profile.name || email.split('@')[0];
-
-    console.log('Extracted user info - email:', email, 'name:', name);
-
-    // Check if user exists
-    const { rows: existingUsers } = await pool.query(
-      'SELECT id, email, name, status FROM users WHERE email = $1',
-      [email]
-    );
-
-    console.log('Existing users found:', existingUsers.length);
-
-    let user;
-    if (existingUsers.length === 0) {
-      // Create new user
-      console.log('Creating new user...');
-      const { rows: newUsers } = await pool.query(
-        'INSERT INTO users (name, email, password, created_at, last_login_time) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, email, name, status',
-        [name, email, ''] // Empty password for SAML users
-      );
-      user = newUsers[0];
-      console.log('User created successfully:', user.id);
-    } else {
-      // Update existing user's last login time
-      user = existingUsers[0];
-      console.log('Existing user found:', user.id, 'status:', user.status);
-      if (user.status === 'blocked') {
-        console.error('Account is blocked');
-        return res.status(403).json({ message: 'Account is blocked' });
-      }
-      await pool.query(
-        'UPDATE users SET last_login_time = NOW() WHERE id = $1',
-        [user.id]
-      );
-    }
-
-    // Generate JWT token
-    console.log('Generating JWT token...');
+    console.log('SAML ACS callback received user:', req.user);
+    
+    const user = req.user;
     const token = jwt.sign(
       { userId: user.id, email: user.email },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }
     );
 
-    console.log('JWT token generated successfully');
-
-    // Redirect to frontend with token
     const frontendUrl = 'https://userly-pro.vercel.app';
-    const redirectUrl = RelayState || `${frontendUrl}/auth/callback?token=${token}`;
+    const redirectUrl = `${frontendUrl}/auth/callback?token=${token}`;
     
-    // If RelayState is provided, append the token as query param
-    const finalRedirectUrl = redirectUrl.includes('?') 
-      ? `${redirectUrl}&token=${token}`
-      : `${redirectUrl}?token=${token}`;
-
-    console.log('Redirecting to:', finalRedirectUrl);
-    res.redirect(finalRedirectUrl);
+    console.log('Redirecting to:', redirectUrl);
+    res.redirect(redirectUrl);
   } catch (error) {
-    console.error('SAML ACS error (GET):', error);
-    res.status(500).json({ message: 'SAML authentication failed', error: error.message });
+    console.error('SAML ACS callback error:', error);
+    res.redirect('https://userly-pro.vercel.app/login?error=saml_failed');
   }
 });
 
-// SAML ACS (Assertion Consumer Service) endpoint - POST handler for SAML responses
-router.post('/acs', async (req, res) => {
-  try {
-    console.log('SAML ACS received POST request');
-    const SAMLResponse = req.body.SAMLResponse;
-    const RelayState = req.body.RelayState;
-
-    console.log('SAMLResponse present:', !!SAMLResponse);
-    console.log('RelayState:', RelayState);
-
-    if (!SAMLResponse) {
-      console.error('SAMLResponse missing from request');
-      return res.status(400).json({ message: 'SAMLResponse is required' });
-    }
-
-    // Find the SAML config that matches this response
-    // In production, you might need to identify the config based on the issuer or other metadata
-    console.log('Available SAML configs:', samlConfigs.length);
-    if (samlConfigs.length === 0) {
-      console.error('No SAML configuration found');
-      return res.status(400).json({ message: 'No SAML configuration found' });
-    }
-
-    // Use the first config (in production, you'd need to match the correct config)
-    const config = samlConfigs[0];
-    console.log('Using SAML config:', config.id, config.saml_name);
-    const strategy = getSamlStrategy(config);
-
-    // Manually validate the SAML response
-    console.log('Validating SAML response...');
-    const { profile } = await new Promise((resolve, reject) => {
-      strategy._validatePostResponse(req.body, (err, profile) => {
-        if (err) {
-          console.error('SAML validation error:', err);
-          reject(err);
-        }
-        else {
-          console.log('SAML validation successful, profile:', profile);
-          resolve({ profile });
-        }
-      });
-    });
-
-    // Extract user information from SAML profile
-    const email = profile.nameID || profile.email;
-    const name = profile.displayName || profile.name || email.split('@')[0];
-
-    console.log('Extracted user info - email:', email, 'name:', name);
-
-    // Check if user exists
-    const { rows: existingUsers } = await pool.query(
-      'SELECT id, email, name, status FROM users WHERE email = $1',
-      [email]
-    );
-
-    console.log('Existing users found:', existingUsers.length);
-
-    let user;
-    if (existingUsers.length === 0) {
-      // Create new user
-      console.log('Creating new user...');
-      const { rows: newUsers } = await pool.query(
-        'INSERT INTO users (name, email, password, created_at, last_login_time) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, email, name, status',
-        [name, email, ''] // Empty password for SAML users
-      );
-      user = newUsers[0];
-      console.log('User created successfully:', user.id);
-    } else {
-      // Update existing user's last login time
-      user = existingUsers[0];
-      console.log('Existing user found:', user.id, 'status:', user.status);
-      if (user.status === 'blocked') {
-        console.error('Account is blocked');
-        return res.status(403).json({ message: 'Account is blocked' });
-      }
-      await pool.query(
-        'UPDATE users SET last_login_time = NOW() WHERE id = $1',
-        [user.id]
-      );
-    }
-
-    // Generate JWT token
-    console.log('Generating JWT token...');
-    const token = jwt.sign(
-      { userId: user.id, email: user.email },
-      process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: '24h' }
-    );
-
-    console.log('JWT token generated successfully');
-
-    // Redirect to frontend with token
-    const frontendUrl = 'https://userly-pro.vercel.app';
-    const redirectUrl = RelayState || `${frontendUrl}/auth/callback?token=${token}`;
-    
-    // If RelayState is provided, append the token as query param
-    const finalRedirectUrl = redirectUrl.includes('?') 
-      ? `${redirectUrl}&token=${token}`
-      : `${redirectUrl}?token=${token}`;
-
-    console.log('Redirecting to:', finalRedirectUrl);
-    res.redirect(finalRedirectUrl);
-  } catch (error) {
-    console.error('SAML ACS error:', error);
-    res.status(500).json({ message: 'SAML authentication failed', error: error.message });
-  }
+// Fallback GET handler for direct visits
+router.get('/acs', (req, res) => {
+  res.redirect('https://userly-pro.vercel.app/login');
 });
 
 // SAML SLO (Single Logout) endpoint
