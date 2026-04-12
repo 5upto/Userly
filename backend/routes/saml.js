@@ -228,7 +228,7 @@ router.get('/metadata/:id', authenticateToken, (req, res) => {
 });
 
 // SAML login initiation endpoint
-router.get('/login/:id', (req, res, next) => {
+router.get('/login/:id', async (req, res) => {
   try {
     console.log('SAML login initiation request for ID:', req.params.id);
     console.log('Available configs:', samlConfigs.map(c => ({ id: c.id, name: c.saml_name })));
@@ -240,21 +240,28 @@ router.get('/login/:id', (req, res, next) => {
       return res.status(404).json({ message: 'SAML configuration not found' });
     }
 
-    const strategyName = `saml-${config.id}`;
-    
     console.log('Initiating SAML login for config:', config.id, config.saml_name);
-    console.log('Strategy name:', strategyName);
     console.log('IdP SSO URL:', config.idp_sso_url);
     
-    // Use standard passport-saml authentication
-    passport.authenticate(strategyName, {
-      additionalParams: {
-        RelayState: 'https://userly-pro.vercel.app/auth/callback'
+    // Get the strategy to generate the SAML request
+    const strategy = getSamlStrategy(config);
+    
+    // Generate SAML request URL using the strategy's internal method
+    strategy._generateAuthorizeRequest(
+      req,
+      (err, requestUrl) => {
+        if (err) {
+          console.error('Error generating SAML request:', err);
+          return res.status(500).json({ message: 'Failed to generate SAML request', error: err.message });
+        }
+        
+        console.log('Generated SAML request URL:', requestUrl);
+        res.redirect(requestUrl);
       }
-    })(req, res, next);
+    );
   } catch (error) {
     console.error('SAML login initiation error:', error);
-    res.status(500).json({ message: 'SAML login initiation failed', error: error.message, stack: error.stack });
+    res.status(500).json({ message: 'SAML login initiation failed', error: error.message });
   }
 });
 

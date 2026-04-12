@@ -18,6 +18,7 @@ const AuthCallback = () => {
     const token = searchParams.get('token');
     if (token) {
       localStorage.setItem('token', token);
+      sessionStorage.removeItem('samlRedirected');
       navigate('/dashboard');
     } else {
       navigate('/login');

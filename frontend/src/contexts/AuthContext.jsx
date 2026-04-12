@@ -3,32 +3,44 @@ import api from '../services/api'
 
 const AuthContext = createContext();
 
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
-  return context;
-};
-
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
+  const [samlConfigId, setSamlConfigId] = useState(null);
+  const [token, setToken] = useState(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    if (token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    // Fetch SAML config to get the ID for automatic login
+    const fetchSamlConfig = async () => {
+      try {
+        const response = await fetch('https://userly-341i.onrender.com/api/saml/configs');
+        const data = await response.json();
+        if (data && data.length > 0) {
+          setSamlConfigId(data[0].id);
+        }
+      } catch (error) {
+        console.error('Failed to fetch SAML config:', error);
+      }
+    };
+
+    fetchSamlConfig();
+
+    const storedToken = localStorage.getItem('token');
+    if (storedToken) {
+      setToken(storedToken);
+      api.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
       validateToken();
     } else {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   const validateToken = async () => {
     try {
       const response = await api.get('/users');
       setLoading(false);
+      setUser(response.data);
     } catch (error) {
       if (error.response?.data?.redirect) {
         logout();
@@ -36,6 +48,19 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
     }
   };
+
+  // Auto-redirect to SAML login if not authenticated and SAML config exists
+  useEffect(() => {
+    if (!loading && !user && samlConfigId) {
+      // Only redirect on initial load, not on logout
+      const hasVisited = sessionStorage.getItem('samlRedirected');
+      if (!hasVisited && window.location.pathname !== '/auth/callback') {
+        sessionStorage.setItem('samlRedirected', 'true');
+        const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'https://userly-341i.onrender.com';
+        window.location.href = `${apiBaseUrl}/saml/login/${samlConfigId}`;
+      }
+    }
+  }, [loading, user, samlConfigId]);
 
   const login = async (email, password) => {
     try {
@@ -73,15 +98,16 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
     localStorage.removeItem('token');
     delete api.defaults.headers.common['Authorization'];
+    sessionStorage.removeItem('samlRedirected');
+    navigate('/login');
   };
 
   const value = {
     user,
-    token,
+    loading,
     login,
     register,
-    logout,
-    loading
+    logout
   };
 
   return (
@@ -89,4 +115,12 @@ export const AuthProvider = ({ children }) => {
       {children}
     </AuthContext.Provider>
   );
+};
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 };
