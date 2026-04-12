@@ -8,7 +8,6 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [samlConfigId, setSamlConfigId] = useState(null);
   const [token, setToken] = useState(null);
-  const navigate = useNavigate();
 
   useEffect(() => {
     // Fetch SAML config to get the ID for automatic login
@@ -52,9 +51,10 @@ export const AuthProvider = ({ children }) => {
   // Auto-redirect to SAML login if not authenticated and SAML config exists
   useEffect(() => {
     if (!loading && !user && samlConfigId) {
-      // Only redirect on initial load, not on logout
+      // Only redirect on initial load, not on logout or after manual login attempts
       const hasVisited = sessionStorage.getItem('samlRedirected');
-      if (!hasVisited && window.location.pathname !== '/auth/callback') {
+      const isLoginOrRegisterPage = window.location.pathname === '/login' || window.location.pathname === '/register';
+      if (!hasVisited && !isLoginOrRegisterPage && window.location.pathname !== '/auth/callback') {
         sessionStorage.setItem('samlRedirected', 'true');
         const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'https://userly-341i.onrender.com';
         window.location.href = `${apiBaseUrl}/saml/login/${samlConfigId}`;
@@ -64,16 +64,20 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     try {
+      console.log('Manual login attempt for:', email);
       const response = await api.post('/auth/login', { email, password });
       const { token: newToken, user: userData } = response.data;
       
+      console.log('Login successful, user data:', userData);
       setToken(newToken);
       setUser(userData);
       localStorage.setItem('token', newToken);
       api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      sessionStorage.removeItem('samlRedirected'); // Clear SAML redirect flag
       
       return { success: true };
     } catch (error) {
+      console.error('Login failed:', error);
       return { 
         success: false, 
         message: error.response?.data?.message || 'Login failed' 
@@ -99,7 +103,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('token');
     delete api.defaults.headers.common['Authorization'];
     sessionStorage.removeItem('samlRedirected');
-    navigate('/login');
+    window.location.href = '/login';
   };
 
   const value = {

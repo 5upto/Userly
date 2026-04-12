@@ -266,17 +266,47 @@ router.get('/login/:id', async (req, res) => {
 });
 
 // SAML ACS (Assertion Consumer Service) endpoint - handles POST (HTTP-POST binding)
-router.post('/acs', async (req, res) => {
+router.post('/acs', (req, res, next) => {
   console.log('SAML ACS received POST request');
   console.log('Request body keys:', Object.keys(req.body));
   console.log('SAMLResponse present:', !!req.body.SAMLResponse);
   console.log('RelayState:', req.body.RelayState);
   
-  res.json({ 
-    message: 'POST route is working',
-    hasSAMLResponse: !!req.body.SAMLResponse,
-    timestamp: new Date().toISOString()
-  });
+  // Use the first available config for authentication
+  if (samlConfigs.length === 0) {
+    console.error('No SAML configuration found');
+    return res.status(400).json({ message: 'No SAML configuration found' });
+  }
+  
+  const config = samlConfigs[0];
+  const strategyName = `saml-${config.id}`;
+  
+  console.log('Using strategy:', strategyName);
+  
+  passport.authenticate(strategyName, { 
+    failureRedirect: 'https://userly-pro.vercel.app/login',
+    session: false 
+  })(req, res, next);
+}, async (req, res) => {
+  try {
+    console.log('SAML ACS callback received user:', req.user);
+    
+    const user = req.user;
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: '24h' }
+    );
+
+    const frontendUrl = 'https://userly-pro.vercel.app';
+    const redirectUrl = `${frontendUrl}/auth/callback?token=${token}`;
+    
+    console.log('Redirecting to:', redirectUrl);
+    res.redirect(redirectUrl);
+  } catch (error) {
+    console.error('SAML ACS callback error:', error);
+    res.redirect('https://userly-pro.vercel.app/login?error=saml_failed');
+  }
 });
 
 // Fallback GET handler for direct visits

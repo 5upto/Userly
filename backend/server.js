@@ -14,7 +14,8 @@ const PORT = process.env.PORT || 3000;
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100
+  max: 1000,
+  skip: (req) => req.path.startsWith('/api/auth')
 });
 
 app.use(limiter);
@@ -26,7 +27,10 @@ app.use('/api/saml', cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.use(cors({ origin: 'https://userly-pro.vercel.app' }));
+app.use(cors({ 
+  origin: ['https://userly-pro.vercel.app', 'http://localhost:5173'],
+  credentials: true 
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
