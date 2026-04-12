@@ -27,6 +27,48 @@ let samlConfigs = [];
 // Store strategies by config ID
 const strategies = {};
 
+// Load SAML configs from database on startup
+const loadSamlConfigsFromDb = async () => {
+  try {
+    console.log('Loading SAML configurations from database...');
+    const { rows } = await pool.query(
+      'SELECT * FROM saml_configs ORDER BY created_at DESC'
+    );
+    
+    if (rows && rows.length > 0) {
+      console.log(`Found ${rows.length} SAML configuration(s) in database`);
+      
+      // Transform database rows to config objects
+      samlConfigs = rows.map(row => ({
+        id: row.id,
+        saml_name: row.saml_name,
+        allowed_domains: row.allowed_domains,
+        issuer_url: row.issuer_url,
+        idp_sso_url: row.idp_sso_url,
+        idp_certificate: row.idp_certificate,
+        created_at: row.created_at
+      }));
+      
+      // Register each config's strategy with passport
+      samlConfigs.forEach(config => {
+        const strategy = getSamlStrategy(config);
+        const strategyName = `saml-${config.id}`;
+        passport.use(strategyName, strategy);
+        console.log(`Registered SAML strategy: ${strategyName}`);
+      });
+      
+      console.log('SAML configurations loaded and strategies registered successfully');
+    } else {
+      console.log('No SAML configurations found in database');
+    }
+  } catch (error) {
+    console.error('Failed to load SAML configs from database:', error);
+  }
+};
+
+// Call load function on module initialization
+setTimeout(loadSamlConfigsFromDb, 1000); // Delay to ensure DB is connected
+
 // Function to create SAML strategy for a given config (no caching to ensure updates take effect)
 const getSamlStrategy = (config) => {
   const strategyName = `saml-${config.id}`;
@@ -185,7 +227,36 @@ router.post('/config', authenticateToken, upload.single('metadataFile'), async (
       updated_at: new Date().toISOString()
     };
 
+    // Save to database for persistence
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO saml_configs (id, saml_name, allowed_domains, issuer_url, idp_sso_url, idp_certificate, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (id) DO UPDATE SET
+           saml_name = EXCLUDED.saml_name,
+           allowed_domains = EXCLUDED.allowed_domains,
+           issuer_url = EXCLUDED.issuer_url,
+           idp_sso_url = EXCLUDED.idp_sso_url,
+           idp_certificate = EXCLUDED.idp_certificate,
+           updated_at = NOW()
+         RETURNING *`,
+        [config.id, config.saml_name, config.allowed_domains, config.issuer_url, 
+         config.idp_sso_url, config.idp_certificate, config.created_at]
+      );
+      console.log('SAML config saved to database:', rows[0].id);
+    } catch (dbError) {
+      console.error('Failed to save SAML config to database:', dbError);
+      // Continue with in-memory only if DB fails
+    }
+
     samlConfigs.push(config);
+    
+    // Register the SAML strategy with passport
+    const strategy = getSamlStrategy(config);
+    const strategyName = `saml-${config.id}`;
+    passport.use(strategyName, strategy);
+    console.log(`Registered new SAML strategy: ${strategyName}`);
+    
     res.status(201).json(config);
   } catch (error) {
     console.error('Error saving SAML config:', error);
