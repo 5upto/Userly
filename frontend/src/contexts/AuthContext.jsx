@@ -26,10 +26,25 @@ export const AuthProvider = ({ children }) => {
     fetchSamlConfig();
 
     const storedToken = localStorage.getItem('token');
+    const storedUser = localStorage.getItem('user');
+    
     if (storedToken) {
       setToken(storedToken);
       api.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
-      validateToken();
+      
+      // Use stored user data if available
+      if (storedUser) {
+        try {
+          const userData = JSON.parse(storedUser);
+          setUser(userData);
+          setLoading(false);
+        } catch (e) {
+          console.error('Failed to parse stored user:', e);
+          validateToken();
+        }
+      } else {
+        validateToken();
+      }
     } else {
       setLoading(false);
     }
@@ -37,9 +52,28 @@ export const AuthProvider = ({ children }) => {
 
   const validateToken = async () => {
     try {
+      // Get current user profile from token
       const response = await api.get('/users');
       setLoading(false);
-      setUser(response.data);
+      // If response is an array (all users), find the current user by matching email from token
+      if (Array.isArray(response.data)) {
+        const token = localStorage.getItem('token');
+        if (token) {
+          const base64Url = token.split('.')[1];
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+          const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+          }).join(''));
+          const payload = JSON.parse(jsonPayload);
+          const currentUser = response.data.find(u => u.email === payload.email);
+          if (currentUser) {
+            setUser(currentUser);
+            localStorage.setItem('user', JSON.stringify(currentUser));
+          }
+        }
+      } else {
+        setUser(response.data);
+      }
     } catch (error) {
       if (error.response?.data?.redirect) {
         logout();
@@ -72,6 +106,7 @@ export const AuthProvider = ({ children }) => {
       setToken(newToken);
       setUser(userData);
       localStorage.setItem('token', newToken);
+      localStorage.setItem('user', JSON.stringify(userData));
       api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
       sessionStorage.removeItem('samlRedirected'); // Clear SAML redirect flag
       
@@ -98,9 +133,10 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
-    setToken(null);
-    setUser(null);
     localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+    setToken(null);
     delete api.defaults.headers.common['Authorization'];
     sessionStorage.removeItem('samlRedirected');
     window.location.href = '/login';

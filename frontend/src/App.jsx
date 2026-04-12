@@ -19,6 +19,28 @@ const AuthCallback = () => {
     if (token) {
       localStorage.setItem('token', token);
       sessionStorage.removeItem('samlRedirected');
+      
+      // Decode JWT to get user info
+      try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        const payload = JSON.parse(jsonPayload);
+        
+        // Store user info from token
+        const user = {
+          id: payload.userId,
+          email: payload.email,
+          name: payload.name
+        };
+        localStorage.setItem('user', JSON.stringify(user));
+        console.log('User stored from token:', user);
+      } catch (e) {
+        console.error('Failed to decode token:', e);
+      }
+      
       navigate('/dashboard');
     } else {
       navigate('/login');
