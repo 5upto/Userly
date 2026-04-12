@@ -259,7 +259,7 @@ router.get('/login/:id', (req, res, next) => {
 });
 
 // SAML ACS (Assertion Consumer Service) endpoint - handles POST (HTTP-POST binding)
-router.post('/acs', async (req, res) => {
+router.post('/acs', (req, res, next) => {
   try {
     console.log('SAML ACS received POST request');
     console.log('Request body keys:', Object.keys(req.body));
@@ -301,7 +301,7 @@ router.post('/acs', async (req, res) => {
       
       // Handle user creation/update and token generation
       handleSamlUser(profile, res);
-    })(req, res);
+    })(req, res, next);
   } catch (error) {
     console.error('SAML ACS error:', error);
     console.error('Error stack:', error.stack);
