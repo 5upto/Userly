@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
-const Saml = require('@node-saml/node-saml');
+const { SAML } = require('@node-saml/node-saml');
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../uploads');
@@ -28,10 +28,10 @@ const samlInstances = {};
 
 // Function to create SAML instance for a given config
 const getSamlInstance = (config) => {
-  const saml = new Saml({
+  const saml = new SAML({
     entryPoint: config.idp_sso_url,
     issuer: `userly-${config.id}`,
-    cert: config.idp_certificate,
+    idpCert: config.idp_certificate,
     callbackUrl: 'https://userly-341i.onrender.com/api/saml/acs',
     identifierFormat: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
   });
