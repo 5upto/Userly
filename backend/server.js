@@ -6,9 +6,10 @@ require('dotenv').config();
 const { initDatabase } = require('./config/database');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
+const samlRoutes = require('./routes/saml');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -18,12 +19,14 @@ const limiter = rateLimit({
 app.use(limiter);
 app.use(cors({ origin: 'https://userly-pro.vercel.app' }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 const path = require('path');
 app.use(express.static(path.join(__dirname, '../frontend/dist')));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/saml', samlRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ message: 'Server is running', timestamp: new Date().toISOString() });

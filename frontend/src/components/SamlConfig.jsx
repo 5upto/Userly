@@ -1,0 +1,399 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
+import api from '../services/api';
+
+const SamlConfig = () => {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  const [config, setConfig] = useState({
+    samlName: '',
+    allowedDomains: '',
+    issuerUrl: '',
+    idpSsoUrl: '',
+    idpCertificate: '',
+    metadataFile: null
+  });
+  const [existingConfigs, setExistingConfigs] = useState([]);
+  const [showNewConfig, setShowNewConfig] = useState(false);
+
+  useEffect(() => {
+    fetchConfigs();
+  }, []);
+
+  const fetchConfigs = async () => {
+    try {
+      console.log('Fetching SAML configs...');
+      const response = await api.get('/saml/configs');
+      console.log('Fetched configs:', response.data);
+      setExistingConfigs(response.data);
+    } catch (error) {
+      console.error('Failed to fetch SAML configs:', error);
+      console.error('Error response:', error.response);
+    }
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setConfig({ ...config, [name]: value });
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    setConfig({ ...config, metadataFile: file });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('samlName', config.samlName);
+      formData.append('allowedDomains', config.allowedDomains);
+      formData.append('issuerUrl', config.issuerUrl);
+      formData.append('idpSsoUrl', config.idpSsoUrl);
+      formData.append('idpCertificate', config.idpCertificate);
+      if (config.metadataFile) {
+        formData.append('metadataFile', config.metadataFile);
+      }
+
+      console.log('Submitting SAML config:', {
+        samlName: config.samlName,
+        allowedDomains: config.allowedDomains,
+        hasMetadata: !!config.metadataFile
+      });
+
+      const response = await api.post('/saml/config', formData);
+      console.log('SAML config saved successfully:', response.data);
+
+      toast.success('SAML configuration saved successfully');
+      setShowNewConfig(false);
+      setConfig({
+        samlName: '',
+        allowedDomains: '',
+        issuerUrl: '',
+        idpSsoUrl: '',
+        idpCertificate: '',
+        metadataFile: null
+      });
+      fetchConfigs();
+    } catch (error) {
+      console.error('SAML config save error:', error);
+      console.error('Error response:', error.response);
+      console.error('Error data:', error.response?.data);
+      toast.error(error.response?.data?.message || error.message || 'Failed to save SAML configuration');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this SAML configuration?')) return;
+
+    try {
+      await api.delete(`/saml/config/${id}`);
+      toast.success('SAML configuration deleted successfully');
+      fetchConfigs();
+    } catch (error) {
+      console.error('Delete error:', error);
+      toast.error('Failed to delete SAML configuration');
+    }
+  };
+
+  const downloadMetadata = async (configId) => {
+    try {
+      console.log('Downloading metadata for config:', configId);
+      const response = await api.get(`/saml/metadata/${configId}`, {
+        responseType: 'blob'
+      });
+      
+      console.log('Metadata response received:', response);
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'saml-metadata.xml');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      toast.success('Metadata downloaded successfully');
+    } catch (error) {
+      console.error('Download metadata error:', error);
+      console.error('Error response:', error.response);
+      toast.error(error.response?.data?.message || 'Failed to download metadata');
+    }
+  };
+
+  return (
+    <div className="h-screen w-screen bg-gray-50 flex flex-col">
+      <div className="flex-1 overflow-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="mb-8">
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="inline-flex items-center text-indigo-600 hover:text-indigo-800 mb-4"
+            >
+              <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              Back to Dashboard
+            </button>
+            <h1 className="text-3xl font-bold text-gray-900">SAML 2.0 Configuration for Entra ID</h1>
+            <p className="mt-2 text-gray-600">Configure SAML 2.0 single sign-on with Microsoft Entra ID (formerly Azure AD)</p>
+          </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Existing Configurations */}
+          <div className="bg-white shadow rounded-lg p-6">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-semibold text-gray-900">Existing Configurations</h2>
+              <button
+                onClick={() => setShowNewConfig(!showNewConfig)}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+              >
+                <svg className="w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                New Configuration
+              </button>
+            </div>
+
+            {existingConfigs.length === 0 ? (
+              <div className="text-center py-12 text-gray-500">
+                <svg className="w-12 h-12 mx-auto mb-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <p>No SAML configurations found</p>
+                <p className="text-sm mt-2">Click "New Configuration" to add one</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {existingConfigs.map((cfg) => (
+                  <div key={cfg.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <h3 className="font-semibold text-gray-900">{cfg.saml_name}</h3>
+                        <p className="text-sm text-gray-600">Domains: {cfg.allowed_domains}</p>
+                      </div>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => downloadMetadata(cfg.id)}
+                          className="inline-flex items-center px-3 py-1 border border-gray-300 text-sm font-medium rounded text-gray-700 bg-white hover:bg-gray-50"
+                        >
+                          <svg className="w-4 h-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                          </svg>
+                          Download Metadata
+                        </button>
+                        <button
+                          onClick={() => handleDelete(cfg.id)}
+                          className="inline-flex items-center px-3 py-1 border border-red-300 text-sm font-medium rounded text-red-700 bg-white hover:bg-red-50"
+                        >
+                          <svg className="w-4 h-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                    {cfg.issuer_url && (
+                      <div className="text-sm text-gray-600">
+                        <p><strong>Issuer URL:</strong> {cfg.issuer_url}</p>
+                        <p><strong>SSO URL:</strong> {cfg.idp_sso_url}</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* New Configuration Form */}
+          {showNewConfig && (
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-xl font-semibold text-gray-900 mb-6">New SAML Configuration</h2>
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">SAML Name</label>
+                  <input
+                    type="text"
+                    name="samlName"
+                    value={config.samlName}
+                    onChange={handleInputChange}
+                    required
+                    placeholder="e.g., SAML Entra ID"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Allowed Domains</label>
+                  <input
+                    type="text"
+                    name="allowedDomains"
+                    value={config.allowedDomains}
+                    onChange={handleInputChange}
+                    required
+                    placeholder="e.g., yourcompany.onmicrosoft.com"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <p className="mt-1 text-sm text-gray-500">Comma-separated list of allowed domains</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Upload Metadata (Optional)</label>
+                  <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:border-indigo-500 transition-colors">
+                    <div className="space-y-1 text-center">
+                      <svg className="mx-auto h-12 w-12 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      <div className="flex text-sm text-gray-600">
+                        <label className="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500 focus-within:outline-none">
+                          <span>Upload a file</span>
+                          <input type="file" accept=".xml" onChange={handleFileChange} className="sr-only" />
+                        </label>
+                        <p className="pl-1">or drag and drop</p>
+                      </div>
+                      <p className="text-xs text-gray-500">XML file up to 10MB</p>
+                      {config.metadataFile && (
+                        <p className="text-sm text-indigo-600 mt-2">Selected: {config.metadataFile.name}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-200 pt-6">
+                  <p className="text-sm text-gray-600 mb-4">Or enter Entra ID details manually:</p>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Issuer URL (Entity ID)</label>
+                    <input
+                      type="text"
+                      name="issuerUrl"
+                      value={config.issuerUrl}
+                      onChange={handleInputChange}
+                      placeholder="https://sts.windows.net/{tenant-id}/"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">IdP SSO URL</label>
+                    <input
+                      type="text"
+                      name="idpSsoUrl"
+                      value={config.idpSsoUrl}
+                      onChange={handleInputChange}
+                      placeholder="https://login.microsoftonline.com/{tenant-id}/saml2"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">IdP Certificate (X.509)</label>
+                    <textarea
+                      name="idpCertificate"
+                      value={config.idpCertificate}
+                      onChange={handleInputChange}
+                      rows={4}
+                      placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewConfig(false)}
+                    className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {loading ? 'Saving...' : 'Save Configuration'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* Setup Instructions */}
+          <div className="bg-white shadow rounded-lg p-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-6">Entra ID Setup Instructions</h2>
+            <div className="space-y-4">
+              <div className="bg-blue-50 border-l-4 border-blue-400 p-4">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-sm text-blue-700">
+                      Your application URL: <strong>https://userly-pro.vercel.app</strong>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="font-medium text-gray-900">Step 1: Create Enterprise Application in Entra ID</h3>
+                <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600 ml-4">
+                  <li>Go to Microsoft Entra admin center</li>
+                  <li>Navigate to Applications &gt; Enterprise applications</li>
+                  <li>Click "New application" &gt; "Create your own application"</li>
+                  <li>Enter a name (e.g., "Userly") and select "Integrate any other application you don't find in the gallery"</li>
+                  <li>Click Create</li>
+                </ol>
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="font-medium text-gray-900">Step 2: Configure SAML SSO</h3>
+                <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600 ml-4">
+                  <li>In the new application, go to "Single sign-on"</li>
+                  <li>Select "SAML" as the single sign-on method</li>
+                  <li>Download the "Federation Metadata XML" file from Entra ID</li>
+                  <li>Upload it in the form above, or copy the values manually</li>
+                </ol>
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="font-medium text-gray-900">Step 3: Configure Reply URL</h3>
+                <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600 ml-4">
+                  <li>In Basic SAML Configuration, set Reply URL (Assertion Consumer Service URL) to:</li>
+                  <li className="font-mono text-xs bg-gray-100 p-2 rounded">https://userly-pro.vercel.app/api/saml/acs</li>
+                </ol>
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="font-medium text-gray-900">Step 4: Download Service Provider Metadata</h3>
+                <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600 ml-4">
+                  <li>After saving your configuration, click "Download Metadata"</li>
+                  <li>Upload this metadata file to your Entra ID application</li>
+                  <li>Or manually configure the Identifier (Entity ID) and Reply URL in Entra ID</li>
+                </ol>
+              </div>
+
+              <div className="space-y-3">
+                <h3 className="font-medium text-gray-900">Step 5: Assign Users</h3>
+                <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600 ml-4">
+                  <li>Go to "Users and groups" in your Entra ID application</li>
+                  <li>Add users or groups that should have access</li>
+                  <li>Ensure users are assigned to the application</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default SamlConfig;
