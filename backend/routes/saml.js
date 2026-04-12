@@ -229,24 +229,33 @@ router.get('/metadata/:id', authenticateToken, (req, res) => {
 
 // SAML login initiation endpoint
 router.get('/login/:id', (req, res, next) => {
-  const config = samlConfigs.find(c => c.id === parseInt(req.params.id));
-  
-  if (!config) {
-    return res.status(404).json({ message: 'SAML configuration not found' });
-  }
-
-  const strategyName = `saml-${config.id}`;
-  
-  console.log('Initiating SAML login for config:', config.id, config.saml_name);
-  console.log('Strategy name:', strategyName);
-  console.log('IdP SSO URL:', config.idp_sso_url);
-  
-  // Use standard passport-saml authentication
-  passport.authenticate(strategyName, {
-    additionalParams: {
-      RelayState: 'https://userly-pro.vercel.app/auth/callback'
+  try {
+    console.log('SAML login initiation request for ID:', req.params.id);
+    console.log('Available configs:', samlConfigs.map(c => ({ id: c.id, name: c.saml_name })));
+    
+    const config = samlConfigs.find(c => c.id === parseInt(req.params.id));
+    
+    if (!config) {
+      console.error('SAML configuration not found for ID:', req.params.id);
+      return res.status(404).json({ message: 'SAML configuration not found' });
     }
-  })(req, res, next);
+
+    const strategyName = `saml-${config.id}`;
+    
+    console.log('Initiating SAML login for config:', config.id, config.saml_name);
+    console.log('Strategy name:', strategyName);
+    console.log('IdP SSO URL:', config.idp_sso_url);
+    
+    // Use standard passport-saml authentication
+    passport.authenticate(strategyName, {
+      additionalParams: {
+        RelayState: 'https://userly-pro.vercel.app/auth/callback'
+      }
+    })(req, res, next);
+  } catch (error) {
+    console.error('SAML login initiation error:', error);
+    res.status(500).json({ message: 'SAML login initiation failed', error: error.message, stack: error.stack });
+  }
 });
 
 // SAML ACS (Assertion Consumer Service) endpoint - handles POST (HTTP-POST binding)
