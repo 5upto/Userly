@@ -266,8 +266,18 @@ router.post('/config', requireAdmin, upload.single('metadataFile'), async (req, 
 });
 
 // Delete SAML configuration
-router.delete('/config/:id', requireAdmin, (req, res) => {
+router.delete('/config/:id', requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
+  
+  // Remove from database
+  try {
+    await pool.query('DELETE FROM saml_configs WHERE id = $1', [id]);
+    console.log('SAML config deleted from database:', id);
+  } catch (dbError) {
+    console.error('Failed to delete SAML config from database:', dbError);
+  }
+  
+  // Remove from memory
   samlConfigs = samlConfigs.filter(config => config.id !== id);
   res.json({ message: 'Configuration deleted successfully' });
 });

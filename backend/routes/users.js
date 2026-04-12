@@ -98,8 +98,8 @@ router.patch('/:id/role', authenticateToken, requireSuperAdmin, async (req, res)
     const { id } = req.params;
     const { role } = req.body;
 
-    if (!role || !['user', 'admin', 'super_admin'].includes(role)) {
-      return res.status(400).json({ message: 'Valid role is required (user, admin, super_admin)' });
+    if (!role || !['standard', 'user', 'admin', 'super_admin'].includes(role)) {
+      return res.status(400).json({ message: 'Valid role is required (standard, user, admin, super_admin)' });
     }
 
     // Prevent changing your own role

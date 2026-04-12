@@ -222,7 +222,7 @@ const SamlConfig = () => {
                     onChange={handleInputChange}
                     required
                     placeholder="e.g., SAML Entra ID"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   />
                 </div>
 
@@ -235,7 +235,7 @@ const SamlConfig = () => {
                     onChange={handleInputChange}
                     required
                     placeholder="e.g., yourcompany.onmicrosoft.com"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   />
                   <p className="mt-1 text-sm text-gray-500">Comma-separated list of allowed domains</p>
                 </div>
@@ -273,7 +273,7 @@ const SamlConfig = () => {
                       value={config.issuerUrl}
                       onChange={handleInputChange}
                       placeholder="https://sts.windows.net/{tenant-id}/"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     />
                   </div>
 
@@ -285,7 +285,7 @@ const SamlConfig = () => {
                       value={config.idpSsoUrl}
                       onChange={handleInputChange}
                       placeholder="https://login.microsoftonline.com/{tenant-id}/saml2"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     />
                   </div>
 
@@ -297,7 +297,7 @@ const SamlConfig = () => {
                       onChange={handleInputChange}
                       rows={4}
                       placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     />
                   </div>
                 </div>
