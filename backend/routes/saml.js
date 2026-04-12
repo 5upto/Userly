@@ -233,7 +233,7 @@ router.get('/acs', (req, res) => {
 });
 
 // SAML ACS (Assertion Consumer Service) endpoint - POST handler for SAML responses
-router.post('/acs', express.urlencoded({ extended: true }), async (req, res) => {
+router.post('/acs', async (req, res) => {
   try {
     console.log('SAML ACS received POST request');
     const SAMLResponse = req.body.SAMLResponse;
