@@ -4,9 +4,10 @@ const multer = require('multer');
 const xml2js = require('xml2js');
 const fs = require('fs');
 const path = require('path');
+const passport = require('passport');
+const SamlStrategy = require('passport-saml').Strategy;
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
-const { SAML } = require('@node-saml/node-saml');
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../uploads');
@@ -23,21 +24,69 @@ const upload = multer({
 // In-memory storage for SAML configurations (in production, use a database)
 let samlConfigs = [];
 
-// Store SAML instances by config ID
-const samlInstances = {};
+// Store strategies by config ID
+const strategies = {};
 
-// Function to create SAML instance for a given config
-const getSamlInstance = (config) => {
-  const saml = new SAML({
-    entryPoint: config.idp_sso_url,
-    issuer: `userly-${config.id}`,
-    idpCert: config.idp_certificate,
-    callbackUrl: 'https://userly-341i.onrender.com/api/saml/acs',
-    identifierFormat: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
-  });
-  
-  samlInstances[config.id] = saml;
-  return saml;
+// Function to create SAML strategy for a given config (no caching to ensure updates take effect)
+const getSamlStrategy = (config) => {
+  const strategyName = `saml-${config.id}`;
+
+  const strategy = new SamlStrategy(
+    {
+      name: strategyName,
+      entryPoint: config.idp_sso_url,
+      issuer: `userly-${config.id}`,
+      cert: config.idp_certificate,
+      callbackUrl: 'https://userly-341i.onrender.com/api/saml/acs',
+      identifierFormat: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
+      passReqToCallback: true
+    },
+    async (req, profile, done) => {
+      try {
+        // Extract user information from SAML profile
+        const email = profile.nameID || profile.email;
+        const name = profile.displayName || profile.name || email.split('@')[0];
+        
+        // Check if user exists
+        const { rows: existingUsers } = await pool.query(
+          'SELECT id, email, name, status FROM users WHERE email = $1',
+          [email]
+        );
+
+        let user;
+        if (existingUsers.length === 0) {
+          // Create new user
+          const { rows: newUsers } = await pool.query(
+            'INSERT INTO users (name, email, password, created_at, last_login_time) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING id, email, name, status',
+            [name, email, ''] // Empty password for SAML users
+          );
+          user = newUsers[0];
+        } else {
+          // Update existing user's last login time
+          user = existingUsers[0];
+          if (user.status === 'blocked') {
+            return done(new Error('Account is blocked'), null);
+          }
+          await pool.query(
+            'UPDATE users SET last_login_time = NOW() WHERE id = $1',
+            [user.id]
+          );
+        }
+
+        done(null, user);
+      } catch (error) {
+        console.error('SAML profile processing error:', error);
+        done(error, null);
+      }
+    }
+  );
+
+  // Remove old strategy if exists and register new one
+  if (passport._strategies[strategyName]) {
+    delete passport._strategies[strategyName];
+  }
+  passport.use(strategy);
+  return strategy;
 };
 
 // Middleware to verify JWT token
@@ -68,7 +117,7 @@ router.get('/status', (req, res) => {
   res.json({
     configsCount: samlConfigs.length,
     configs: samlConfigs.map(c => ({ id: c.id, name: c.saml_name, ssoUrl: c.idp_sso_url })),
-    samlInstances: Object.keys(samlInstances).length
+    strategiesRegistered: Object.keys(strategies).length
   });
 });
 
@@ -179,7 +228,7 @@ router.get('/metadata/:id', authenticateToken, (req, res) => {
 });
 
 // SAML login initiation endpoint
-router.get('/login/:id', async (req, res) => {
+router.get('/login/:id', (req, res, next) => {
   try {
     console.log('SAML login initiation request for ID:', req.params.id);
     console.log('Available configs:', samlConfigs.map(c => ({ id: c.id, name: c.saml_name })));
@@ -191,27 +240,26 @@ router.get('/login/:id', async (req, res) => {
       return res.status(404).json({ message: 'SAML configuration not found' });
     }
 
+    const strategyName = `saml-${config.id}`;
+    
     console.log('Initiating SAML login for config:', config.id, config.saml_name);
+    console.log('Strategy name:', strategyName);
     console.log('IdP SSO URL:', config.idp_sso_url);
     
-    const saml = getSamlInstance(config);
-    
-    // Generate SAML login request
-    const requestUrl = await saml.createLoginRequestAsync(req, {
-      RelayState: 'https://userly-pro.vercel.app/auth/callback'
-    });
-    
-    console.log('Redirecting to IdP:', requestUrl);
-    res.redirect(requestUrl);
+    // Use standard passport-saml authentication
+    passport.authenticate(strategyName, {
+      additionalParams: {
+        RelayState: 'https://userly-pro.vercel.app/auth/callback'
+      }
+    })(req, res, next);
   } catch (error) {
     console.error('SAML login initiation error:', error);
-    console.error('Error details:', error.message);
     res.status(500).json({ message: 'SAML login initiation failed', error: error.message });
   }
 });
 
 // SAML ACS (Assertion Consumer Service) endpoint - handles POST (HTTP-POST binding)
-router.post('/acs', async (req, res) => {
+router.post('/acs', (req, res, next) => {
   try {
     console.log('SAML ACS received POST request');
     console.log('Request body keys:', Object.keys(req.body));
@@ -226,24 +274,39 @@ router.post('/acs', async (req, res) => {
     }
     
     const config = samlConfigs[0];
-    console.log('Using config:', config.id, config.saml_name);
+    const strategyName = `saml-${config.id}`;
+    
+    console.log('Using strategy:', strategyName);
     console.log('Config details:', { id: config.id, name: config.saml_name, ssoUrl: config.idp_sso_url });
     
-    const saml = getSamlInstance(config);
-    
-    // Validate SAML response
-    console.log('Validating SAML response...');
-    const profile = await saml.validatePostResponseAsync(req.body);
-    
-    console.log('SAML validation successful, profile:', profile);
-    
-    // Handle user creation/update and token generation
-    await handleSamlUser(profile, res);
+    // Use passport-saml authentication
+    passport.authenticate(strategyName, { 
+      failureRedirect: 'https://userly-pro.vercel.app/login?error=auth_failed',
+      failureFlash: true,
+      session: false 
+    }, (err, profile) => {
+      if (err) {
+        console.error('Passport authentication error:', err);
+        console.error('Error type:', err.name);
+        console.error('Error message:', err.message);
+        const errorMsg = encodeURIComponent(err.message || 'Unknown error');
+        return res.redirect(`https://userly-pro.vercel.app/login?error=passport_error&details=${errorMsg}`);
+      }
+      if (!profile) {
+        console.error('No profile returned from passport');
+        return res.redirect('https://userly-pro.vercel.app/login?error=no_profile');
+      }
+      
+      console.log('SAML authentication successful, profile:', profile);
+      
+      // Handle user creation/update and token generation
+      handleSamlUser(profile, res);
+    })(req, res, next);
   } catch (error) {
     console.error('SAML ACS error:', error);
     console.error('Error stack:', error.stack);
     const errorMsg = encodeURIComponent(error.message || 'Unknown error');
-    res.redirect(`https://userly-pro.vercel.app/login?error=saml_validation_failed&details=${errorMsg}`);
+    res.redirect(`https://userly-pro.vercel.app/login?error=acs_failed&details=${errorMsg}`);
   }
 });
 
