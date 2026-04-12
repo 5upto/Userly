@@ -259,42 +259,48 @@ router.get('/login/:id', (req, res, next) => {
 });
 
 // SAML ACS (Assertion Consumer Service) endpoint - handles POST (HTTP-POST binding)
-router.post('/acs', async (req, res) => {
-  try {
-    console.log('SAML ACS received POST request');
-    console.log('Request body keys:', Object.keys(req.body));
-    console.log('SAMLResponse present:', !!req.body.SAMLResponse);
-    console.log('RelayState:', req.body.RelayState);
-    console.log('Available SAML configs:', samlConfigs.length);
-    
-    // Use the first available config for authentication
-    if (samlConfigs.length === 0) {
-      console.error('No SAML configuration found - configs may have been lost on server restart');
-      return res.redirect('https://userly-pro.vercel.app/login?error=no_saml_config');
+router.post('/acs', (req, res, next) => {
+  console.log('SAML ACS received POST request');
+  console.log('Request body keys:', Object.keys(req.body));
+  console.log('SAMLResponse present:', !!req.body.SAMLResponse);
+  console.log('RelayState:', req.body.RelayState);
+  console.log('Available SAML configs:', samlConfigs.length);
+  
+  // Use the first available config for authentication
+  if (samlConfigs.length === 0) {
+    console.error('No SAML configuration found - configs may have been lost on server restart');
+    return res.redirect('https://userly-pro.vercel.app/login?error=no_saml_config');
+  }
+  
+  const config = samlConfigs[0];
+  const strategyName = `saml-${config.id}`;
+  
+  console.log('Using strategy:', strategyName);
+  console.log('Config details:', { id: config.id, name: config.saml_name, ssoUrl: config.idp_sso_url });
+  
+  passport.authenticate(strategyName, { 
+    failureRedirect: 'https://userly-pro.vercel.app/login?error=auth_failed',
+    failureFlash: true,
+    session: false 
+  }, (err, profile) => {
+    if (err) {
+      console.error('Passport authentication error:', err);
+      console.error('Error type:', err.name);
+      console.error('Error message:', err.message);
+      return res.redirect('https://userly-pro.vercel.app/login?error=passport_error');
+    }
+    if (!profile) {
+      console.error('No profile returned from passport');
+      return res.redirect('https://userly-pro.vercel.app/login?error=no_profile');
     }
     
-    const config = samlConfigs[0];
-    const strategy = getSamlStrategy(config);
-    
-    console.log('Using strategy for config:', config.id, config.saml_name);
-    console.log('Config details:', { id: config.id, name: config.saml_name, ssoUrl: config.idp_sso_url });
-    
-    // Manually validate the SAML response
-    console.log('Validating SAML response...');
-    const { profile } = await new Promise((resolve, reject) => {
-      strategy._validatePostResponse(req.body, (err, profile) => {
-        if (err) {
-          console.error('SAML validation error:', err);
-          console.error('Error details:', JSON.stringify(err, null, 2));
-          reject(err);
-        } else {
-          console.log('SAML validation successful, profile:', profile);
-          resolve({ profile });
-        }
-      });
-    });
-
-    // Extract user information from SAML profile
+    console.log('SAML authentication successful, profile:', profile);
+    req.user = profile;
+    next();
+  })(req, res, next);
+}, async (req, res) => {
+  try {
+    const profile = req.user;
     const email = profile.nameID || profile.email;
     const name = profile.displayName || profile.name || email.split('@')[0];
 
@@ -349,9 +355,9 @@ router.post('/acs', async (req, res) => {
     console.log('Redirecting to:', redirectUrl);
     res.redirect(redirectUrl);
   } catch (error) {
-    console.error('SAML ACS error:', error);
+    console.error('SAML ACS callback error:', error);
     console.error('Error stack:', error.stack);
-    res.redirect('https://userly-pro.vercel.app/login?error=saml_validation_failed');
+    res.redirect('https://userly-pro.vercel.app/login?error=token_generation_failed');
   }
 });
 
