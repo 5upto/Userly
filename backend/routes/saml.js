@@ -27,13 +27,9 @@ let samlConfigs = [];
 // Store strategies by config ID
 const strategies = {};
 
-// Function to create or retrieve SAML strategy for a given config
+// Function to create SAML strategy for a given config (no caching to ensure updates take effect)
 const getSamlStrategy = (config) => {
   const strategyName = `saml-${config.id}`;
-  
-  if (strategies[config.id]) {
-    return strategies[config.id];
-  }
 
   const strategy = new SamlStrategy(
     {
@@ -85,8 +81,11 @@ const getSamlStrategy = (config) => {
     }
   );
 
+  // Remove old strategy if exists and register new one
+  if (passport._strategies[strategyName]) {
+    delete passport._strategies[strategyName];
+  }
   passport.use(strategy);
-  strategies[config.id] = strategy;
   return strategy;
 };
 
