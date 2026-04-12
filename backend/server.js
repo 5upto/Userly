@@ -23,6 +23,18 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
 
+// Allow SAML ACS endpoint to be loaded from frames (required for SAML POST binding)
+app.use((req, res, next) => {
+  if (req.path === '/api/saml/acs') {
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self' *");
+    res.removeHeader('X-Frame-Options');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  next();
+});
+
 const path = require('path');
 app.use(express.static(path.join(__dirname, '../frontend/dist')));
 

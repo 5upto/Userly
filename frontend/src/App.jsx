@@ -1,5 +1,5 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useSearchParams, useNavigate } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
@@ -10,6 +10,23 @@ import Register from './components/Register';
 import Dashboard from './components/Dashboard';
 import SamlConfig from './components/SamlConfig';
 
+const AuthCallback = () => {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const token = searchParams.get('token');
+    if (token) {
+      localStorage.setItem('token', token);
+      navigate('/dashboard');
+    } else {
+      navigate('/login');
+    }
+  }, [searchParams, navigate]);
+
+  return <div>Processing authentication...</div>;
+};
+
 function App() {
   return (
     <AuthProvider>
@@ -18,6 +35,7 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
             <Route 
               path="/dashboard" 
               element={

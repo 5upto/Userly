@@ -29,12 +29,15 @@ const strategies = {};
 
 // Function to create or retrieve SAML strategy for a given config
 const getSamlStrategy = (config) => {
+  const strategyName = `saml-${config.id}`;
+  
   if (strategies[config.id]) {
     return strategies[config.id];
   }
 
   const strategy = new SamlStrategy(
     {
+      name: strategyName,
       entryPoint: config.idp_sso_url,
       issuer: `userly-${config.id}`,
       cert: config.idp_certificate,
@@ -82,6 +85,7 @@ const getSamlStrategy = (config) => {
     }
   );
 
+  passport.use(strategy);
   strategies[config.id] = strategy;
   return strategy;
 };
@@ -195,6 +199,32 @@ router.get('/metadata/:id', authenticateToken, (req, res) => {
   res.setHeader('Content-Type', 'application/xml');
   res.setHeader('Content-Disposition', 'attachment; filename="saml-metadata.xml"');
   res.send(metadata);
+});
+
+// SAML login initiation endpoint
+router.get('/login/:id', async (req, res) => {
+  try {
+    const config = samlConfigs.find(c => c.id === parseInt(req.params.id));
+    
+    if (!config) {
+      return res.status(404).json({ message: 'SAML configuration not found' });
+    }
+
+    const strategy = getSamlStrategy(config);
+    const strategyName = `saml-${config.id}`;
+    
+    // Set RelayState to redirect back to frontend after authentication
+    const relayState = 'https://userly-pro.vercel.app/auth/callback';
+    
+    // Generate SAML request and redirect to IdP
+    passport.authenticate(strategyName, {
+      samlFallback: 'login-request',
+      RelayState: relayState
+    })(req, res);
+  } catch (error) {
+    console.error('SAML login initiation error:', error);
+    res.status(500).json({ message: 'SAML login initiation failed', error: error.message });
+  }
 });
 
 // SAML ACS (Assertion Consumer Service) endpoint
