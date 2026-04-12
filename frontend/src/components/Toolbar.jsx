@@ -31,6 +31,8 @@ const Toolbar = ({ selectedUsers, onBlock, onUnblock, onDelete, onMakeAdmin, onR
   const isSuperAdmin = userRole === 'super_admin';
   
   
+  const isAdmin = userRole === 'admin' || userRole === 'super_admin';
+  
   // Check if selected users include any standard users (for Make Admin button)
   const hasStandardUser = selectedUsers.some(id => {
     const u = users.find(user => user.id === id || user.id === parseInt(id));
@@ -42,6 +44,15 @@ const Toolbar = ({ selectedUsers, onBlock, onUnblock, onDelete, onMakeAdmin, onR
     const u = users.find(user => user.id === id || user.id === parseInt(id));
     return u && u.role === 'admin';
   });
+  
+  // Check if selected users include any Super Admin (to disable for regular Admin)
+  const hasSuperAdmin = selectedUsers.some(id => {
+    const u = users.find(user => user.id === id || user.id === parseInt(id));
+    return u && u.role === 'super_admin';
+  });
+  
+  // Regular admin cannot block/unblock super admin
+  const canBlockUnblock = !hasSuperAdmin || isSuperAdmin;
 
   return (
     <div className="bg-white border-b border-gray-200 px-4 py-3 sm:px-6">
@@ -55,8 +66,8 @@ const Toolbar = ({ selectedUsers, onBlock, onUnblock, onDelete, onMakeAdmin, onR
         <div className="flex items-center space-x-2">
           <button
             onClick={onBlock}
-            disabled={!hasSelection || loading}
-            title="Block"
+            disabled={!hasSelection || loading || !canBlockUnblock}
+            title={!canBlockUnblock ? "Cannot block Super Admin" : "Block"}
             className="inline-flex items-center p-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -66,8 +77,8 @@ const Toolbar = ({ selectedUsers, onBlock, onUnblock, onDelete, onMakeAdmin, onR
 
           <button
             onClick={onUnblock}
-            disabled={!hasSelection || loading}
-            title="Unblock"
+            disabled={!hasSelection || loading || !canBlockUnblock}
+            title={!canBlockUnblock ? "Cannot unblock Super Admin" : "Unblock"}
             className="inline-flex items-center p-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
