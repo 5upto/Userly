@@ -23,7 +23,7 @@ app.use(limiter);
 app.use('/api/saml', cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type']
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(cors({ origin: 'https://userly-pro.vercel.app' }));

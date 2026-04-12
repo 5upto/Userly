@@ -138,7 +138,11 @@ router.options('/acs', (req, res) => {
 // Create or update SAML configuration
 router.post('/config', authenticateToken, upload.single('metadataFile'), async (req, res) => {
   try {
+    console.log('SAML config save request received');
+    console.log('Request body keys:', Object.keys(req.body));
+    console.log('Has file:', !!req.file);
     const { samlName, allowedDomains, issuerUrl, idpSsoUrl, idpCertificate } = req.body;
+    console.log('Config name:', samlName);
 
     // Parse metadata file if provided
     let parsedMetadata = null;
