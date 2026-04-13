@@ -4,11 +4,9 @@ const multer = require('multer');
 const xml2js = require('xml2js');
 const fs = require('fs');
 const path = require('path');
-const zlib = require('zlib');
 const passport = require('passport');
 const SamlStrategy = require('passport-saml').Strategy;
 const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
 const { pool } = require('../config/database');
 const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
@@ -376,12 +374,10 @@ router.post('/acs', (req, res, next) => {
         return res.redirect('https://userly-pro.vercel.app/login?error=no_profile');
       }
       
-      console.log('SAML authentication successful');
-      console.log('Profile keys:', Object.keys(profile || {}));
-      console.log('Full profile:', JSON.stringify(profile, null, 2));
+      console.log('SAML authentication successful, profile:', profile);
       
       // Handle user creation/update and token generation
-      handleSamlUser(profile, config, res);
+      handleSamlUser(profile, res);
     })(req, res, next);
   } catch (error) {
     console.error('SAML ACS error:', error);
@@ -391,19 +387,12 @@ router.post('/acs', (req, res, next) => {
   }
 });
 
-async function handleSamlUser(profile, config, res) {
+async function handleSamlUser(profile, res) {
   try {
-    // Handle different NameID formats from passport-saml
-    const nameID = profile.nameID || profile.nameId || profile.name_id || profile.email;
-    const email = profile.email || profile.mail || profile['urn:oid:0.9.2342.19200300.100.1.3'] || nameID;
-    const name = profile.displayName || profile.name || profile.cn || profile['urn:oid:2.16.840.1.113730.3.1.241'] || email.split('@')[0];
-    const sessionIndex = profile.sessionIndex || profile.sessionindex || profile.SessionIndex;
+    const email = profile.nameID || profile.email;
+    const name = profile.displayName || profile.name || email.split('@')[0];
 
-    console.log('Extracted SAML info:');
-    console.log('  nameID:', nameID);
-    console.log('  email:', email);
-    console.log('  name:', name);
-    console.log('  sessionIndex:', sessionIndex);
+    console.log('Extracted user info - email:', email, 'name:', name);
 
     // Check if user exists
     const { rows: existingUsers } = await pool.query(
@@ -419,7 +408,7 @@ async function handleSamlUser(profile, config, res) {
       console.log('Creating new user...');
       const { rows: newUsers } = await pool.query(
         'INSERT INTO users (name, email, password, role, created_at, last_login_time) VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING id, email, name, status, role',
-        [name, email, '', 'standard']
+        [name, email, '', 'standard'] // Empty password for SAML users, default role
       );
       user = newUsers[0];
       console.log('User created successfully:', user.id);
@@ -437,29 +426,13 @@ async function handleSamlUser(profile, config, res) {
       );
     }
 
-    // Generate JWT token with unique JTI for session tracking
-    const tokenJti = crypto.randomUUID();
-    console.log('Generating JWT token with JTI:', tokenJti);
+    // Generate JWT token
+    console.log('Generating JWT token...');
     const token = jwt.sign(
-      { userId: user.id, email: user.email, name: user.name, role: user.role || 'standard', jti: tokenJti },
+      { userId: user.id, email: user.email, name: user.name, role: user.role || 'standard' },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }
     );
-
-    // Store SAML session for Single Logout
-    if (nameID) {
-      try {
-        await pool.query(
-          `INSERT INTO saml_sessions (user_id, saml_name_id, saml_session_index, saml_config_id, token_jti, is_active, created_at)
-           VALUES ($1, $2, $3, $4, $5, true, NOW())`,
-          [user.id, nameID, sessionIndex || null, config.id, tokenJti]
-        );
-        console.log('SAML session stored for user:', user.id);
-      } catch (sessionError) {
-        console.error('Failed to store SAML session:', sessionError);
-        // Continue even if session storage fails
-      }
-    }
 
     console.log('JWT token generated successfully');
 
@@ -482,176 +455,10 @@ router.get('/acs', (req, res) => {
   res.redirect('https://userly-pro.vercel.app/login');
 });
 
-// SAML SLO (Single Logout) endpoint - handles IdP-initiated logout
-router.get('/slo', handleSloRequest);
-router.post('/slo', handleSloRequest);
-
-async function handleSloRequest(req, res) {
-  try {
-    console.log('========================================');
-    console.log('SAML SLO request received');
-    console.log('Method:', req.method);
-    console.log('Query:', req.query);
-    console.log('Body:', req.body);
-    console.log('Headers:', req.headers);
-    console.log('========================================');
-
-    let samlRequest = req.query.SAMLRequest || (req.body && req.body.SAMLRequest);
-    let relayState = req.query.RelayState || (req.body && req.body.RelayState);
-
-    let nameID = null;
-    let sessionIndex = null;
-
-    // Parse SAML LogoutRequest if present
-    if (samlRequest) {
-      try {
-        // Entra ID sends DEFLATE compressed + base64 encoded data for HTTP-Redirect
-        let decodedRequest;
-        try {
-          // Try DEFLATE decompression first (HTTP-Redirect binding)
-          const inflated = zlib.inflateRawSync(Buffer.from(samlRequest, 'base64'));
-          decodedRequest = inflated.toString('utf8');
-          console.log('Successfully DEFLATE decompressed SAML LogoutRequest');
-        } catch (inflateError) {
-          // Fall back to plain base64 (HTTP-POST binding)
-          decodedRequest = Buffer.from(samlRequest, 'base64').toString('utf8');
-          console.log('Plain base64 decoded SAML LogoutRequest');
-        }
-        
-        console.log('Decoded SAML LogoutRequest XML:', decodedRequest);
-        
-        const parser = new xml2js.Parser({ explicitArray: false });
-        const parsedRequest = await parser.parseStringPromise(decodedRequest);
-        
-        console.log('Parsed LogoutRequest:', JSON.stringify(parsedRequest, null, 2));
-        
-        const logoutRequest = parsedRequest.LogoutRequest || parsedRequest['samlp:LogoutRequest'];
-        if (logoutRequest) {
-          // Handle various NameID formats
-          const nameIdObj = logoutRequest.NameID || logoutRequest['saml:NameID'];
-          if (typeof nameIdObj === 'string') {
-            nameID = nameIdObj;
-          } else if (nameIdObj && nameIdObj._) {
-            nameID = nameIdObj._;
-          } else if (nameIdObj && nameIdObj['$']) {
-            nameID = nameIdObj['$'].value || nameIdObj._;
-          }
-          
-          // Handle SessionIndex
-          const sessionIdxObj = logoutRequest.SessionIndex;
-          if (typeof sessionIdxObj === 'string') {
-            sessionIndex = sessionIdxObj;
-          } else if (sessionIdxObj && sessionIdxObj._) {
-            sessionIndex = sessionIdxObj._;
-          } else if (sessionIdxObj && sessionIdxObj['$']) {
-            sessionIndex = sessionIdxObj['$'].value || sessionIdxObj._;
-          }
-          
-          console.log('Extracted from LogoutRequest - nameID:', nameID, 'sessionIndex:', sessionIndex);
-        } else {
-          console.log('No LogoutRequest found in parsed XML');
-        }
-      } catch (parseError) {
-        console.error('Error parsing SAML LogoutRequest:', parseError);
-      }
-    } else {
-      console.log('No SAMLRequest found in query or body');
-    }
-
-    // If we have a nameID, invalidate the sessions
-    if (nameID) {
-      console.log('Invalidating SAML sessions for nameID:', nameID);
-      
-      try {
-        // Mark all sessions for this NameID as logged out
-        const { rowCount } = await pool.query(
-          `UPDATE saml_sessions 
-           SET is_active = false, logged_out_at = NOW() 
-           WHERE saml_name_id = $1 AND is_active = true`,
-          [nameID]
-        );
-        console.log(`Invalidated ${rowCount} active SAML session(s) for nameID:`, nameID);
-
-        // Also invalidate by sessionIndex if provided
-        if (sessionIndex) {
-          const { rowCount: sessionCount } = await pool.query(
-            `UPDATE saml_sessions 
-             SET is_active = false, logged_out_at = NOW() 
-             WHERE saml_session_index = $1 AND is_active = true`,
-            [sessionIndex]
-          );
-          console.log(`Invalidated ${sessionCount} session(s) by sessionIndex:`, sessionIndex);
-        }
-      } catch (dbError) {
-        console.error('Error invalidating sessions in database:', dbError);
-      }
-    }
-
-    // Generate simple LogoutResponse
-    const logoutResponse = generateLogoutResponse();
-    
-    // Redirect back to IdP or return response
-    if (relayState) {
-      return res.redirect(`${relayState}?logout=success`);
-    }
-
-    // Return success response
-    res.setHeader('Content-Type', 'application/xml');
-    res.send(logoutResponse);
-    
-  } catch (error) {
-    console.error('SLO handling error:', error);
-    res.status(500).send('Logout processing failed');
-  }
-}
-
-function generateLogoutResponse() {
-  const responseId = `_${crypto.randomUUID()}`;
-  const instant = new Date().toISOString();
-  
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<samlp:LogoutResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
-                      xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
-                      ID="${responseId}"
-                      Version="2.0"
-                      IssueInstant="${instant}"
-                      Destination="https://userly-341i.onrender.com/api/saml/slo">
-  <samlp:Status>
-    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
-  </samlp:Status>
-</samlp:LogoutResponse>`;
-}
-
-// SP-initiated logout - triggers logout from IdP
-router.post('/logout', authenticateToken, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const tokenJti = req.user.jti;
-    
-    console.log('SP-initiated logout for user:', userId);
-
-    // Mark user's SAML sessions as logged out
-    if (tokenJti) {
-      await pool.query(
-        `UPDATE saml_sessions 
-         SET is_active = false, logged_out_at = NOW() 
-         WHERE token_jti = $1 OR user_id = $2`,
-        [tokenJti, userId]
-      );
-    } else {
-      await pool.query(
-        `UPDATE saml_sessions 
-         SET is_active = false, logged_out_at = NOW() 
-         WHERE user_id = $1`,
-        [userId]
-      );
-    }
-
-    res.json({ message: 'Logged out successfully' });
-  } catch (error) {
-    console.error('Logout error:', error);
-    res.status(500).json({ message: 'Logout failed' });
-  }
+// SAML SLO (Single Logout) endpoint
+router.get('/slo', (req, res) => {
+  // Handle single logout
+  res.send('SAML SLO endpoint');
 });
 
 module.exports = router;
