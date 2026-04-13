@@ -270,8 +270,10 @@ router.delete('/config/:id', authenticateToken, requireAdmin, async (req, res) =
     console.error('Failed to delete SAML config from database:', dbError);
   }
   
-  // Remove from memory
-  samlConfigs = samlConfigs.filter(config => config.id !== id);
+  // Remove from memory - handle both string and number IDs
+  const initialLength = samlConfigs.length;
+  samlConfigs = samlConfigs.filter(config => parseInt(config.id) !== id);
+  console.log('Removed from memory:', initialLength - samlConfigs.length, 'configs');
   res.json({ message: 'Configuration deleted successfully' });
 });
 
