@@ -42,6 +42,29 @@ const initDatabase = async () => {
       )
     `);
 
+    // Create SAML sessions table for Single Logout tracking
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS saml_sessions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        saml_name_id VARCHAR(255) NOT NULL,
+        saml_session_index VARCHAR(255),
+        saml_config_id BIGINT NOT NULL,
+        token_jti VARCHAR(255),
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        logged_out_at TIMESTAMPTZ NULL
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_saml_sessions_name_id ON saml_sessions(saml_name_id)
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_saml_sessions_user_id ON saml_sessions(user_id)
+    `);
+
     // Migration: Add role column if it doesn't exist (for existing tables)
     await client.query(`
       ALTER TABLE users 
