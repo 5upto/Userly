@@ -4,6 +4,7 @@ const multer = require('multer');
 const xml2js = require('xml2js');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const passport = require('passport');
 const SamlStrategy = require('passport-saml').Strategy;
 const jwt = require('jsonwebtoken');
@@ -375,7 +376,9 @@ router.post('/acs', (req, res, next) => {
         return res.redirect('https://userly-pro.vercel.app/login?error=no_profile');
       }
       
-      console.log('SAML authentication successful, profile:', profile);
+      console.log('SAML authentication successful');
+      console.log('Profile keys:', Object.keys(profile || {}));
+      console.log('Full profile:', JSON.stringify(profile, null, 2));
       
       // Handle user creation/update and token generation
       handleSamlUser(profile, config, res);
@@ -390,12 +393,17 @@ router.post('/acs', (req, res, next) => {
 
 async function handleSamlUser(profile, config, res) {
   try {
-    const email = profile.nameID || profile.email;
-    const name = profile.displayName || profile.name || email.split('@')[0];
-    const nameID = profile.nameID;
-    const sessionIndex = profile.sessionIndex;
+    // Handle different NameID formats from passport-saml
+    const nameID = profile.nameID || profile.nameId || profile.name_id || profile.email;
+    const email = profile.email || profile.mail || profile['urn:oid:0.9.2342.19200300.100.1.3'] || nameID;
+    const name = profile.displayName || profile.name || profile.cn || profile['urn:oid:2.16.840.1.113730.3.1.241'] || email.split('@')[0];
+    const sessionIndex = profile.sessionIndex || profile.sessionindex || profile.SessionIndex;
 
-    console.log('Extracted user info - email:', email, 'name:', name, 'nameID:', nameID, 'sessionIndex:', sessionIndex);
+    console.log('Extracted SAML info:');
+    console.log('  nameID:', nameID);
+    console.log('  email:', email);
+    console.log('  name:', name);
+    console.log('  sessionIndex:', sessionIndex);
 
     // Check if user exists
     const { rows: existingUsers } = await pool.query(
@@ -480,10 +488,13 @@ router.post('/slo', handleSloRequest);
 
 async function handleSloRequest(req, res) {
   try {
+    console.log('========================================');
     console.log('SAML SLO request received');
     console.log('Method:', req.method);
-    console.log('Query params:', req.query);
-    console.log('Body keys:', Object.keys(req.body || {}));
+    console.log('Query:', req.query);
+    console.log('Body:', req.body);
+    console.log('Headers:', req.headers);
+    console.log('========================================');
 
     let samlRequest = req.query.SAMLRequest || (req.body && req.body.SAMLRequest);
     let relayState = req.query.RelayState || (req.body && req.body.RelayState);
@@ -494,22 +505,57 @@ async function handleSloRequest(req, res) {
     // Parse SAML LogoutRequest if present
     if (samlRequest) {
       try {
-        const decodedRequest = Buffer.from(samlRequest, 'base64').toString('utf8');
-        console.log('Decoded SAML LogoutRequest:', decodedRequest);
+        // Entra ID sends DEFLATE compressed + base64 encoded data for HTTP-Redirect
+        let decodedRequest;
+        try {
+          // Try DEFLATE decompression first (HTTP-Redirect binding)
+          const inflated = zlib.inflateRawSync(Buffer.from(samlRequest, 'base64'));
+          decodedRequest = inflated.toString('utf8');
+          console.log('Successfully DEFLATE decompressed SAML LogoutRequest');
+        } catch (inflateError) {
+          // Fall back to plain base64 (HTTP-POST binding)
+          decodedRequest = Buffer.from(samlRequest, 'base64').toString('utf8');
+          console.log('Plain base64 decoded SAML LogoutRequest');
+        }
+        
+        console.log('Decoded SAML LogoutRequest XML:', decodedRequest);
         
         const parser = new xml2js.Parser({ explicitArray: false });
         const parsedRequest = await parser.parseStringPromise(decodedRequest);
         
+        console.log('Parsed LogoutRequest:', JSON.stringify(parsedRequest, null, 2));
+        
         const logoutRequest = parsedRequest.LogoutRequest || parsedRequest['samlp:LogoutRequest'];
         if (logoutRequest) {
-          nameID = logoutRequest.NameID?._ || logoutRequest.NameID || 
-                   logoutRequest['saml:NameID']?._ || logoutRequest['saml:NameID'];
-          sessionIndex = logoutRequest.SessionIndex || logoutRequest['$']?.SessionIndex;
+          // Handle various NameID formats
+          const nameIdObj = logoutRequest.NameID || logoutRequest['saml:NameID'];
+          if (typeof nameIdObj === 'string') {
+            nameID = nameIdObj;
+          } else if (nameIdObj && nameIdObj._) {
+            nameID = nameIdObj._;
+          } else if (nameIdObj && nameIdObj['$']) {
+            nameID = nameIdObj['$'].value || nameIdObj._;
+          }
+          
+          // Handle SessionIndex
+          const sessionIdxObj = logoutRequest.SessionIndex;
+          if (typeof sessionIdxObj === 'string') {
+            sessionIndex = sessionIdxObj;
+          } else if (sessionIdxObj && sessionIdxObj._) {
+            sessionIndex = sessionIdxObj._;
+          } else if (sessionIdxObj && sessionIdxObj['$']) {
+            sessionIndex = sessionIdxObj['$'].value || sessionIdxObj._;
+          }
+          
           console.log('Extracted from LogoutRequest - nameID:', nameID, 'sessionIndex:', sessionIndex);
+        } else {
+          console.log('No LogoutRequest found in parsed XML');
         }
       } catch (parseError) {
         console.error('Error parsing SAML LogoutRequest:', parseError);
       }
+    } else {
+      console.log('No SAMLRequest found in query or body');
     }
 
     // If we have a nameID, invalidate the sessions
