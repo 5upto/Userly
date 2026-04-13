@@ -33,7 +33,8 @@ const AuthCallback = () => {
         const user = {
           id: payload.userId,
           email: payload.email,
-          name: payload.name
+          name: payload.name,
+          role: payload.role || 'standard'
         };
         localStorage.setItem('user', JSON.stringify(user));
         console.log('User stored from token:', user);
@@ -41,7 +42,8 @@ const AuthCallback = () => {
         console.error('Failed to decode token:', e);
       }
       
-      navigate('/dashboard');
+      // Use window.location to force page reload so AuthContext reads the token
+      window.location.href = '/dashboard';
     } else {
       navigate('/login');
     }
