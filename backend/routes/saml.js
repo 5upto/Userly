@@ -507,25 +507,32 @@ function buildLogoutUrl(config, nameID) {
 
 // SP-initiated Single Logout endpoint
 // Called by frontend when user clicks logout
-router.get('/logout/:id', (req, res) => {
+router.get('/logout/:id', async (req, res) => {
   try {
-    const config = samlConfigs.find(c => c.id === parseInt(req.params.id));
-    
+    let config = samlConfigs.find(c => c.id === parseInt(req.params.id));
+
+    // If config not in memory, try reloading from DB (server may have restarted)
+    if (!config) {
+      console.log('Config not in memory, reloading from DB...');
+      await loadSamlConfigsFromDb();
+      config = samlConfigs.find(c => c.id === parseInt(req.params.id));
+    }
+
     if (!config) {
       return res.status(404).json({ message: 'SAML configuration not found' });
     }
-    
+
     if (!config.idp_slo_url) {
       return res.status(400).json({ message: 'SLO not configured for this provider' });
     }
-    
+
     // Get email/NameID from query param (passed by frontend)
     const nameID = req.query.nameID;
-    
+
     // Build and redirect to IdP logout URL
     const logoutUrl = buildLogoutUrl(config, nameID);
     console.log('Redirecting to IdP logout:', logoutUrl);
-    
+
     res.redirect(logoutUrl);
   } catch (error) {
     console.error('SAML logout error:', error);
