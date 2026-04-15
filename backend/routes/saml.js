@@ -463,18 +463,43 @@ router.get('/acs', (req, res) => {
   res.redirect('https://userly-pro.vercel.app/login');
 });
 
-// Build logout URL with NameID for redirect to IdP
+const zlib = require('zlib');
+
+// Build SAML LogoutRequest XML
+function buildLogoutRequestXml(config, nameID) {
+  const id = '_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  const issueInstant = new Date().toISOString();
+  const issuer = `userly-${config.id}`;
+  
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<samlp:LogoutRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+                     xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+                     ID="${id}"
+                     Version="2.0"
+                     IssueInstant="${issueInstant}"
+                     Destination="${config.idp_slo_url}">
+  <saml:Issuer>${issuer}</saml:Issuer>
+  <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">${nameID || ''}</saml:NameID>
+</samlp:LogoutRequest>`;
+}
+
+// Build logout URL with proper SAML LogoutRequest
 function buildLogoutUrl(config, nameID) {
   if (!config.idp_slo_url) {
     return null;
   }
   
+  // Generate SAML LogoutRequest XML
+  const logoutRequestXml = buildLogoutRequestXml(config, nameID);
+  console.log('Generated LogoutRequest:', logoutRequestXml);
+  
+  // Deflate and base64 encode the request
+  const deflated = zlib.deflateRawSync(Buffer.from(logoutRequestXml, 'utf8'));
+  const encodedRequest = deflated.toString('base64');
+  
+  // Build URL with SAMLRequest parameter
   const logoutUrl = new URL(config.idp_slo_url);
-  // Add NameID parameter for Entra ID SLO
-  if (nameID) {
-    logoutUrl.searchParams.append('logout_hint', nameID);
-  }
-  // Add RelayState for redirect back after logout
+  logoutUrl.searchParams.append('SAMLRequest', encodedRequest);
   logoutUrl.searchParams.append('RelayState', 'https://userly-pro.vercel.app/login?logout=success');
   
   return logoutUrl.toString();
