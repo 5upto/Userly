@@ -75,7 +75,7 @@ async function checkUserStatusInEntra(email) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'graph.microsoft.com',
-      path: `/v1.0/users/${encodeURIComponent(email)}?$select=accountEnabled,signInActivity`,
+      path: `/v1.0/users/${encodeURIComponent(email)}?$select=accountEnabled`,
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -94,8 +94,7 @@ async function checkUserStatusInEntra(email) {
             const user = JSON.parse(data);
             resolve({
               exists: true,
-              blocked: !user.accountEnabled,
-              lastSignIn: user.signInActivity?.lastSignInDateTime
+              blocked: !user.accountEnabled
             });
           } else {
             console.error(`Graph API error: ${res.statusCode}`, data);
