@@ -139,7 +139,7 @@ export const AuthProvider = ({ children }) => {
       try {
         // Call backend logout endpoint to initiate SLO if user is SAML-authenticated
         const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'https://userly-341i.onrender.com';
-        const response = await fetch(`${apiBaseUrl}/api/saml/logout`, {
+        const response = await fetch(`${apiBaseUrl}/saml/logout`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
