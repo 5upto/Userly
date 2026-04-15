@@ -108,6 +108,21 @@ router.post('/refresh', async (req, res) => {
       return res.status(401).json({ message: 'Invalid refresh token type' });
     }
 
+    // Check session age - force re-auth with Entra after 30 minutes
+    // This ensures if user is blocked/revoked in Entra, app detects within 30 min max
+    const SESSION_MAX_AGE = 30 * 60 * 1000; // 30 minutes in milliseconds
+    const authTime = decoded.authTime || decoded.iat * 1000;
+    const now = Date.now();
+
+    if (now - authTime > SESSION_MAX_AGE) {
+      console.log('SAML session exceeded max age (30min), forcing re-authentication');
+      return res.status(401).json({
+        message: 'Session expired, please re-authenticate',
+        redirect: true,
+        forceReauth: true
+      });
+    }
+
     // Check if user still exists and is active
     const { rows: users } = await pool.query(
       'SELECT id, name, email, status, role FROM users WHERE email = $1',

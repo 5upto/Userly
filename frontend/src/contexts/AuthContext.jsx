@@ -146,6 +146,17 @@ export const AuthProvider = ({ children }) => {
       if (!response.ok) {
         const error = await response.json();
         console.error('Token refresh failed:', error);
+        if (error.forceReauth) {
+          // Session exceeded max age (30min), redirect to SAML for re-authentication
+          console.log('Session requires re-authentication with Entra');
+          logout();
+          // After logout clears tokens, redirect to SAML login
+          setTimeout(() => {
+            const apiBaseUrl = 'https://userly-341i.onrender.com';
+            window.location.href = `${apiBaseUrl}/saml/login/${samlConfigId || ''}`;
+          }, 100);
+          return;
+        }
         if (error.redirect) {
           logout();
           return;

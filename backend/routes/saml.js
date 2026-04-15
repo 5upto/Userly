@@ -474,9 +474,10 @@ async function handleSamlUser(profile, res) {
       { expiresIn: '15m' }
     );
 
-    // Generate refresh token (24h) for silent renewal
+    // Generate refresh token (24h) for silent renewal with auth time for max session tracking
+    const now = Date.now();
     const refreshToken = jwt.sign(
-      { userId: user.id, email: user.email, authType: 'saml_refresh' },
+      { userId: user.id, email: user.email, authType: 'saml_refresh', authTime: now },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }
     );
