@@ -132,69 +132,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = async () => {
-    const token = localStorage.getItem('token');
-    
-    // DEBUG: Check token contents
-    if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        console.log('Logout - Token authMethod:', payload.authMethod);
-        console.log('Logout - Token samlNameID:', payload.samlNameID);
-        console.log('Logout - Token samlConfigId:', payload.samlConfigId);
-        console.log('Logout - Token samlSessionIndex:', payload.samlSessionIndex);
-      } catch (e) {
-        console.log('Logout - Could not parse token');
-      }
-    }
-    
-    if (token) {
-      try {
-        // Call backend logout endpoint to initiate SLO if user is SAML-authenticated
-        // Use api service which has correct baseURL configured
-        const response = await api.post('/saml/logout');
-        const data = response.data;
-        
-        console.log('Logout - Response:', data);
-        
-        // If SLO was initiated, redirect to IdP logout URL
-        // IMPORTANT: We must redirect BEFORE clearing local storage to ensure the browser follows the redirect
-        if (data.sloInitiated && data.redirectUrl) {
-          console.log('SLO initiated, redirecting to IdP:', data.redirectUrl);
-          
-          // Store a flag that we're in SLO flow
-          sessionStorage.setItem('sloInProgress', 'true');
-          
-          // Clear auth state but keep the redirect
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          setUser(null);
-          setToken(null);
-          delete api.defaults.headers.common['Authorization'];
-          
-          // Redirect to IdP for logout
-          window.location.href = data.redirectUrl;
-          return;
-        }
-        
-        // No SLO - just clear local storage
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setUser(null);
-        setToken(null);
-        delete api.defaults.headers.common['Authorization'];
-        sessionStorage.removeItem('samlRedirected');
-        
-        if (data.message) {
-          console.log('Logout message:', data.message);
-        }
-      } catch (error) {
-        console.error('SLO logout error:', error);
-        // Continue with local logout on error
-      }
-    }
-    
-    // Local logout (non-SAML or SLO not available)
+  const logout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);

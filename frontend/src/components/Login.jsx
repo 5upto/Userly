@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-toastify';
 
@@ -9,30 +9,9 @@ const Login = () => {
     password: ''
   });
   const [loading, setLoading] = useState(false);
-  const [sloMessage, setSloMessage] = useState(null);
   
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-
-  // Handle SLO/Block messages from URL params
-  useEffect(() => {
-    const error = searchParams.get('error');
-    const message = searchParams.get('message');
-    
-    if (error === 'account_blocked') {
-      setSloMessage({ type: 'error', text: message || 'Your account has been blocked. Please contact your administrator.' });
-    } else if (message === 'logged_out' || message?.includes('logged out')) {
-      setSloMessage({ type: 'success', text: 'You have been successfully logged out from all applications.' });
-    } else if (message) {
-      setSloMessage({ type: 'info', text: message });
-    }
-    
-    // Clear URL params
-    if (error || message) {
-      window.history.replaceState({}, '', window.location.pathname);
-    }
-  }, [searchParams]);
 
   const handleChange = (e) => {
     setFormData({
@@ -71,17 +50,6 @@ const Login = () => {
             Sign in to your account
           </h2>
           <p className="text-gray-600">Welcome back! Please enter your details.</p>
-          
-          {/* SLO/Block messages */}
-          {sloMessage && (
-            <div className={`mt-4 p-3 rounded-lg ${
-              sloMessage.type === 'error' ? 'bg-red-100 text-red-700' :
-              sloMessage.type === 'success' ? 'bg-green-100 text-green-700' :
-              'bg-blue-100 text-blue-700'
-            }`}>
-              {sloMessage.text}
-            </div>
-          )}
         </div>
         <form className="space-y-6" onSubmit={handleSubmit}>
           <div className="rounded-md shadow-sm -space-y-px">
@@ -140,7 +108,7 @@ const Login = () => {
             <div className="mt-6">
               <button
                 type="button"
-                onClick={() => window.location.href = 'https://userly-341i.onrender.com/api/saml/login/1776223153932'}
+                onClick={() => window.location.href = 'https://account.activedirectory.windowsazure.com/applications/signin/583d7484-5aa3-46d3-840b-ef314a469bcc?tenantId=838db0c1-3571-4046-9187-f7ed28f52565'}
                 className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
               >
                 <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">

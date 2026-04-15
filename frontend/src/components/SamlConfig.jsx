@@ -11,7 +11,6 @@ const SamlConfig = () => {
     allowedDomains: '',
     issuerUrl: '',
     idpSsoUrl: '',
-    idpSloUrl: '',
     idpCertificate: '',
     metadataFile: null
   });
@@ -54,7 +53,6 @@ const SamlConfig = () => {
       formData.append('allowedDomains', config.allowedDomains);
       formData.append('issuerUrl', config.issuerUrl);
       formData.append('idpSsoUrl', config.idpSsoUrl);
-      formData.append('idpSloUrl', config.idpSloUrl);
       formData.append('idpCertificate', config.idpCertificate);
       if (config.metadataFile) {
         formData.append('metadataFile', config.metadataFile);
@@ -76,7 +74,6 @@ const SamlConfig = () => {
         allowedDomains: '',
         issuerUrl: '',
         idpSsoUrl: '',
-        idpSloUrl: '',
         idpCertificate: '',
         metadataFile: null
       });
@@ -203,7 +200,6 @@ const SamlConfig = () => {
                       <div className="text-sm text-gray-600">
                         <p><strong>Issuer URL:</strong> {cfg.issuer_url}</p>
                         <p><strong>SSO URL:</strong> {cfg.idp_sso_url}</p>
-                        {cfg.idp_slo_url && <p><strong>SLO URL:</strong> {cfg.idp_slo_url} <span className="text-green-600">(Single Logout Enabled)</span></p>}
                       </div>
                     )}
                   </div>
@@ -294,22 +290,6 @@ const SamlConfig = () => {
                   </div>
 
                   <div className="mt-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      IdP Single Logout (SLO) URL
-                      <span className="ml-2 text-xs text-gray-500 font-normal">(Optional - for true Single Logout)</span>
-                    </label>
-                    <input
-                      type="text"
-                      name="idpSloUrl"
-                      value={config.idpSloUrl}
-                      onChange={handleInputChange}
-                      placeholder="https://login.microsoftonline.com/{tenant-id}/saml2/logout"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    />
-                    <p className="mt-1 text-sm text-gray-500">This enables Single Logout (SLO) - when a user logs out, they are also logged out from Entra ID and all connected applications.</p>
-                  </div>
-
-                  <div className="mt-4">
                     <label className="block text-sm font-medium text-gray-700 mb-2">IdP Certificate (X.509)</label>
                     <textarea
                       name="idpCertificate"
@@ -383,13 +363,10 @@ const SamlConfig = () => {
               </div>
 
               <div className="space-y-3">
-                <h3 className="font-medium text-gray-900">Step 3: Configure Reply URL and Logout URL</h3>
+                <h3 className="font-medium text-gray-900">Step 3: Configure Reply URL</h3>
                 <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600 ml-4">
                   <li>In Basic SAML Configuration, set Reply URL (Assertion Consumer Service URL) to:</li>
                   <li className="font-mono text-xs bg-gray-100 p-2 rounded">https://userly-341i.onrender.com/api/saml/acs</li>
-                  <li>Set Logout Url (Single Logout Service URL) to:</li>
-                  <li className="font-mono text-xs bg-gray-100 p-2 rounded">https://userly-341i.onrender.com/api/saml/slo</li>
-                  <li>Enable "Require verification certificate" for secure SLO</li>
                 </ol>
               </div>
 
