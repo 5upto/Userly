@@ -91,4 +91,64 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// Token refresh endpoint for SAML users
+// Allows silent token renewal while checking if user still exists/is active
+router.post('/refresh', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({ message: 'Refresh token required' });
+    }
+
+    // Verify refresh token
+    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET || 'fallback-secret-key');
+
+    if (decoded.authType !== 'saml_refresh') {
+      return res.status(401).json({ message: 'Invalid refresh token type' });
+    }
+
+    // Check if user still exists and is active
+    const { rows: users } = await pool.query(
+      'SELECT id, name, email, status, role FROM users WHERE email = $1',
+      [decoded.email]
+    );
+
+    if (users.length === 0) {
+      return res.status(401).json({ message: 'User not found', redirect: true });
+    }
+
+    const user = users[0];
+
+    if (user.status === 'blocked') {
+      return res.status(403).json({ message: 'Account is blocked', redirect: true });
+    }
+
+    // Generate new short-lived access token
+    const newToken = jwt.sign(
+      { userId: user.id, email: user.email, name: user.name, role: user.role || 'standard', authType: 'saml' },
+      process.env.JWT_SECRET || 'fallback-secret-key',
+      { expiresIn: '15m' }
+    );
+
+    res.json({
+      token: newToken,
+      expiresIn: 900, // 15 minutes in seconds
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        status: user.status,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ message: 'Refresh token expired', redirect: true });
+    }
+    res.status(401).json({ message: 'Invalid refresh token', redirect: true });
+  }
+});
+
 module.exports = router;

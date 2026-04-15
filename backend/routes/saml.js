@@ -444,19 +444,26 @@ async function handleSamlUser(profile, res) {
       );
     }
 
-    // Generate JWT token
+    // Generate short-lived JWT token (15 min) for SAML users to enable SLO detection
     console.log('Generating JWT token...');
     const token = jwt.sign(
-      { userId: user.id, email: user.email, name: user.name, role: user.role || 'standard' },
+      { userId: user.id, email: user.email, name: user.name, role: user.role || 'standard', authType: 'saml' },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: '15m' }
+    );
+
+    // Generate refresh token (24h) for silent renewal
+    const refreshToken = jwt.sign(
+      { userId: user.id, email: user.email, authType: 'saml_refresh' },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }
     );
 
-    console.log('JWT token generated successfully');
+    console.log('JWT token generated successfully (15min expiry)');
 
-    // Redirect to frontend with token
+    // Redirect to frontend with token and refresh token
     const frontendUrl = 'https://userly-pro.vercel.app';
-    const redirectUrl = `${frontendUrl}/auth/callback?token=${token}`;
+    const redirectUrl = `${frontendUrl}/auth/callback?token=${token}&refreshToken=${refreshToken}&expiresIn=900`;
     
     console.log('Redirecting to:', redirectUrl);
     res.redirect(redirectUrl);

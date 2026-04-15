@@ -8,6 +8,26 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [samlConfigId, setSamlConfigId] = useState(null);
   const [token, setToken] = useState(null);
+  const [refreshToken, setRefreshToken] = useState(null);
+  const [tokenExpiry, setTokenExpiry] = useState(null);
+
+  // Token refresh interval
+  useEffect(() => {
+    if (!token || !refreshToken || !tokenExpiry) return;
+
+    // Refresh token 2 minutes before expiry
+    const refreshTime = tokenExpiry - 2 * 60 * 1000;
+    const now = Date.now();
+    const timeUntilRefresh = Math.max(0, refreshTime - now);
+
+    console.log('Token refresh scheduled in', Math.round(timeUntilRefresh / 1000), 'seconds');
+
+    const refreshTimer = setTimeout(() => {
+      refreshAccessToken();
+    }, timeUntilRefresh);
+
+    return () => clearTimeout(refreshTimer);
+  }, [token, refreshToken, tokenExpiry]);
 
   useEffect(() => {
     // Fetch SAML config to get the ID for automatic login
@@ -25,13 +45,31 @@ export const AuthProvider = ({ children }) => {
 
     fetchSamlConfig();
 
+    // Check for SAML callback with tokens
+    const urlParams = new URLSearchParams(window.location.search);
+    const samlToken = urlParams.get('token');
+    const samlRefreshToken = urlParams.get('refreshToken');
+    const samlExpiresIn = urlParams.get('expiresIn');
+
+    if (samlToken && samlRefreshToken) {
+      // Handle SAML auth callback
+      handleSamlCallback(samlToken, samlRefreshToken, parseInt(samlExpiresIn) || 900);
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return;
+    }
+
     const storedToken = localStorage.getItem('token');
+    const storedRefreshToken = localStorage.getItem('refreshToken');
     const storedUser = localStorage.getItem('user');
-    
+    const storedExpiry = localStorage.getItem('tokenExpiry');
+
     if (storedToken) {
       setToken(storedToken);
+      setRefreshToken(storedRefreshToken);
+      if (storedExpiry) setTokenExpiry(parseInt(storedExpiry));
       api.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
-      
+
       // Use stored user data if available
       if (storedUser) {
         try {
@@ -49,6 +87,90 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
     }
   }, []);
+
+  const handleSamlCallback = (newToken, newRefreshToken, expiresIn) => {
+    const expiryTime = Date.now() + expiresIn * 1000;
+
+    setToken(newToken);
+    setRefreshToken(newRefreshToken);
+    setTokenExpiry(expiryTime);
+
+    localStorage.setItem('token', newToken);
+    localStorage.setItem('refreshToken', newRefreshToken);
+    localStorage.setItem('tokenExpiry', expiryTime.toString());
+
+    api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+
+    // Decode token to get user info
+    try {
+      const base64Url = newToken.split('.')[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
+      const payload = JSON.parse(jsonPayload);
+
+      const userData = {
+        id: payload.userId,
+        email: payload.email,
+        name: payload.name,
+        role: payload.role
+      };
+
+      setUser(userData);
+      localStorage.setItem('user', JSON.stringify(userData));
+      sessionStorage.removeItem('samlRedirected');
+    } catch (e) {
+      console.error('Failed to decode token:', e);
+    }
+
+    setLoading(false);
+  };
+
+  const refreshAccessToken = async () => {
+    const currentRefreshToken = localStorage.getItem('refreshToken');
+    if (!currentRefreshToken) {
+      console.log('No refresh token available');
+      logout();
+      return;
+    }
+
+    try {
+      console.log('Refreshing access token...');
+      const response = await fetch('https://userly-341i.onrender.com/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: currentRefreshToken })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error('Token refresh failed:', error);
+        if (error.redirect) {
+          logout();
+          return;
+        }
+        throw new Error('Refresh failed');
+      }
+
+      const data = await response.json();
+      console.log('Token refreshed successfully');
+
+      const newExpiry = Date.now() + data.expiresIn * 1000;
+      setToken(data.token);
+      setTokenExpiry(newExpiry);
+
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('tokenExpiry', newExpiry.toString());
+      localStorage.setItem('user', JSON.stringify(data.user));
+
+      api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
+      setUser(data.user);
+    } catch (error) {
+      console.error('Failed to refresh token:', error);
+      logout();
+    }
+  };
 
   const validateToken = async () => {
     try {
@@ -136,6 +258,17 @@ export const AuthProvider = ({ children }) => {
     const userData = localStorage.getItem('user');
     const userEmail = userData ? JSON.parse(userData).email : null;
 
+    // Clear all tokens first
+    localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('tokenExpiry');
+    localStorage.removeItem('user');
+    setUser(null);
+    setToken(null);
+    setRefreshToken(null);
+    setTokenExpiry(null);
+    delete api.defaults.headers.common['Authorization'];
+
     // Check if any SAML provider has SLO configured
     try {
       const response = await fetch('https://userly-341i.onrender.com/api/saml/providers');
@@ -148,14 +281,7 @@ export const AuthProvider = ({ children }) => {
         const sloUrl = `${apiBaseUrl}/api/saml/logout/${sloProvider.id}${userEmail ? `?nameID=${encodeURIComponent(userEmail)}` : ''}`;
         console.log('Initiating SLO to IdP:', sloUrl);
 
-        // Clear local session first
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setUser(null);
-        setToken(null);
-        delete api.defaults.headers.common['Authorization'];
         sessionStorage.removeItem('samlRedirected');
-
         // Redirect to IdP logout
         window.location.href = sloUrl;
         return;
@@ -164,12 +290,7 @@ export const AuthProvider = ({ children }) => {
       console.error('Failed to check SLO configuration:', error);
     }
 
-    // No SLO configured, do local logout only
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setUser(null);
-    setToken(null);
-    delete api.defaults.headers.common['Authorization'];
+    // No SLO configured, redirect to login
     sessionStorage.removeItem('samlRedirected');
     window.location.href = '/login';
   };
@@ -177,6 +298,7 @@ export const AuthProvider = ({ children }) => {
   const value = {
     user,
     token,
+    refreshToken,
     loading,
     login,
     register,
