@@ -23,15 +23,7 @@ api.interceptors.response.use(
     // Handle Entra block detection with toast
     if (status === 403 && message?.includes('blocked')) {
       // Show toast immediately
-      toast.error('Your account has been blocked in Entra ID. Logging out...', {
-        position: 'top-center',
-        autoClose: 3000,
-        hideProgressBar: false,
-        closeOnClick: false,
-        pauseOnHover: false,
-        draggable: false,
-        theme: 'colored',
-      });
+      toast.error('Your account has been blocked in Entra ID. Logging out...',);
 
       // Wait for toast to be visible then redirect
       await new Promise(resolve => setTimeout(resolve, 3000));
