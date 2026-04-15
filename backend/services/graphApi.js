@@ -114,6 +114,77 @@ async function checkUserStatusInEntra(email) {
   });
 }
 
+// Check if user was recently removed from the security group via audit logs
+async function checkAuditLogsForGroupRemoval(email, securityGroupId) {
+  const token = await getGraphAccessToken();
+  if (!token) return null;
+
+  // Check last 5 minutes of audit logs
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'graph.microsoft.com',
+      path: `/v1.0/auditLogs/directoryAudits?$filter=activityDisplayName%20eq%20'Remove%20member%20from%20group'%20and%20activityDateTime%20ge%20${encodeURIComponent(fiveMinutesAgo)}`,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          if (res.statusCode === 200) {
+            const response = JSON.parse(data);
+            const audits = response.value || [];
+
+            // Check if any audit log entry matches this user and group
+            const userRemoved = audits.some(audit => {
+              const targetResources = audit.targetResources || [];
+              const initiatedBy = audit.initiatedBy?.user || {};
+
+              // Check if this is about our target group
+              const isTargetGroup = targetResources.some(tr =>
+                tr.id === securityGroupId &&
+                tr.type === 'Group'
+              );
+
+              // Check if the removed user matches our email
+              const isUserRemoved = targetResources.some(tr =>
+                tr.type === 'User' &&
+                tr.userPrincipalName?.toLowerCase() === email.toLowerCase()
+              );
+
+              return isTargetGroup && isUserRemoved;
+            });
+
+            resolve({
+              wasRemoved: userRemoved,
+              auditFound: audits.length > 0
+            });
+          } else {
+            console.error(`Audit log API error: ${res.statusCode}`, data);
+            resolve(null);
+          }
+        } catch (e) {
+          console.error('Error parsing audit logs:', e);
+          resolve(null);
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      console.error('Audit log request error:', err);
+      resolve(null);
+    });
+    req.end();
+  });
+}
+
 // Check if user still has access to the application via security group
 async function checkUserAppAccess(email, appClientId) {
   const token = await getGraphAccessToken();
@@ -123,17 +194,26 @@ async function checkUserAppAccess(email, appClientId) {
   const userId = await getUserIdByEmail(email, token);
   if (!userId) return { hasAccess: false, reason: 'User not found' };
 
-  // Get the service principal for this app
+  // Check 1: Direct app role assignment
   const servicePrincipalId = await getServicePrincipalId(appClientId, token);
-  if (!servicePrincipalId) return { hasAccess: true }; // Can't verify, assume access
+  if (servicePrincipalId) {
+    const hasAppAssignment = await checkAppRoleAssignment(userId, servicePrincipalId, token);
+    if (!hasAppAssignment) {
+      // Check 2: Was user recently removed from security group? (via audit logs)
+      const securityGroupId = process.env.SAML_SECURITY_GROUP_ID;
+      if (securityGroupId) {
+        const auditCheck = await checkAuditLogsForGroupRemoval(email, securityGroupId);
+        if (auditCheck?.wasRemoved) {
+          console.log(`Audit log: User ${email} was removed from security group ${securityGroupId}`);
+          return { hasAccess: false, reason: 'User removed from security group' };
+        }
+      }
 
-  // Check if user has app role assignment for this app
-  const hasAppAssignment = await checkAppRoleAssignment(userId, servicePrincipalId, token);
+      return { hasAccess: false, reason: 'User removed from security group' };
+    }
+  }
 
-  return {
-    hasAccess: hasAppAssignment,
-    reason: hasAppAssignment ? null : 'User removed from security group'
-  };
+  return { hasAccess: true };
 }
 
 async function getUserIdByEmail(email, accessToken) {
@@ -320,7 +400,47 @@ async function invalidateUserSessions(userId, reason) {
   }
 }
 
-// Start polling (every 2 minutes)
+// Poll for group removals via audit logs (more frequent)
+async function pollAuditLogsForGroupRemovals() {
+  const securityGroupId = process.env.SAML_SECURITY_GROUP_ID;
+  if (!securityGroupId) return;
+
+  try {
+    // Get all active SAML users
+    const { rows: activeUsers } = await pool.query(
+      `SELECT DISTINCT u.id, u.email
+       FROM users u
+       JOIN user_sessions us ON u.id = us.user_id
+       WHERE us.auth_type = 'saml'
+       AND us.is_active = true`
+    );
+
+    if (activeUsers.length === 0) return;
+
+    // Check audit logs for recent group removals
+    const auditCheck = await checkAuditLogsForGroupRemoval('all', securityGroupId);
+
+    if (auditCheck?.auditFound) {
+      console.log(`Found recent group removal activity in audit logs`);
+
+      // For each active user, verify they still have access
+      for (const user of activeUsers) {
+        const appClientId = process.env.SAML_APP_CLIENT_ID;
+        if (appClientId) {
+          const access = await checkUserAppAccess(user.email, appClientId);
+          if (access && !access.hasAccess) {
+            console.log(`User ${user.email} lost access, invalidating sessions`);
+            await invalidateUserSessions(user.id, access.reason || 'Access revoked');
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error polling audit logs:', error);
+  }
+}
+
+// Start polling (every 2 minutes for status, every 30 seconds for audit logs)
 function startUserStatusPolling() {
   if (!GRAPH_CLIENT_ID || !GRAPH_CLIENT_SECRET || !GRAPH_TENANT_ID) {
     console.log('Graph API not configured. Set GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET, GRAPH_TENANT_ID env vars');
@@ -328,18 +448,25 @@ function startUserStatusPolling() {
   }
 
   console.log('Starting Entra user status polling (every 2 minutes)');
+  console.log('Starting audit log polling for group removals (every 30 seconds)');
 
   // Run immediately on start
   pollUserStatus();
 
-  // Then every 2 minutes
+  // Then every 2 minutes for user status
   setInterval(pollUserStatus, 2 * 60 * 1000);
+
+  // Poll audit logs every 30 seconds for faster group removal detection
+  if (process.env.SAML_SECURITY_GROUP_ID) {
+    setInterval(pollAuditLogsForGroupRemovals, 30 * 1000);
+  }
 }
 
 module.exports = {
   startUserStatusPolling,
   checkUserStatusInEntra,
   checkUserAppAccess,
+  checkAuditLogsForGroupRemoval,
   pollUserStatus,
   invalidateUserSessions
 };
