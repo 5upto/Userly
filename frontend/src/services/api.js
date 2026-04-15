@@ -19,14 +19,14 @@ api.interceptors.response.use(
     const status = error.response?.status;
     const message = error.response?.data?.message;
     const redirect = error.response?.data?.redirect;
+    const reason = error.response?.data?.reason;
 
     // Handle Entra block or security group removal
-    if (status === 403 && (message?.includes('blocked') || message?.includes('revoked') || message?.includes('security group'))) {
-      // Determine the appropriate message and reason
-      const isSecurityGroup = message?.includes('security group');
-      const toastMessage = isSecurityGroup
+    if (status === 403 && (reason === 'blocked' || reason === 'security_group')) {
+      // Determine the appropriate message based on reason from backend
+      const toastMessage = reason === 'security_group'
         ? 'Your access has been revoked.'
-        : 'Session has expired.';
+        : 'Your account has been locked.';
 
       // Show toast immediately
       toast.error(toastMessage);
@@ -38,7 +38,6 @@ api.interceptors.response.use(
       localStorage.removeItem('token');
       localStorage.removeItem('refreshToken');
       localStorage.removeItem('user');
-      const reason = isSecurityGroup ? 'security_group' : 'blocked';
       window.location.href = `/login?blocked=true&reason=${reason}`;
 
       // Return a never-resolving promise to prevent further processing

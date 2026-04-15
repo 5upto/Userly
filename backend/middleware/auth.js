@@ -81,7 +81,8 @@ const authenticateToken = async (req, res, next) => {
 
           return res.status(403).json({
             message: 'Account blocked in Entra ID',
-            redirect: true
+            redirect: true,
+            reason: 'blocked'
           });
         }
 
