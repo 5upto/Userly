@@ -151,10 +151,20 @@ router.get('/providers', (req, res) => {
 });
 
 // Diagnostic endpoint to check SAML status (no auth required for debugging)
-router.get('/status', (req, res) => {
+router.get('/status', async (req, res) => {
+  // Also query DB directly for comparison
+  let dbConfigs = [];
+  try {
+    const { rows } = await pool.query('SELECT id, saml_name, idp_sso_url, idp_slo_url FROM saml_configs');
+    dbConfigs = rows;
+  } catch (e) {
+    dbConfigs = [{ error: e.message }];
+  }
+
   res.json({
     configsCount: samlConfigs.length,
-    configs: samlConfigs.map(c => ({ id: c.id, name: c.saml_name, ssoUrl: c.idp_sso_url })),
+    memoryConfigs: samlConfigs.map(c => ({ id: c.id, name: c.saml_name, sloUrl: c.idp_slo_url })),
+    dbConfigs: dbConfigs,
     strategiesRegistered: Object.keys(strategies).length
   });
 });
@@ -509,16 +519,42 @@ function buildLogoutUrl(config, nameID) {
 // Called by frontend when user clicks logout
 router.get('/logout/:id', async (req, res) => {
   try {
-    let config = samlConfigs.find(c => c.id === parseInt(req.params.id));
+    const requestedId = req.params.id;
+    console.log('SLO requested for ID:', requestedId);
+    console.log('Current samlConfigs count:', samlConfigs.length);
+    console.log('Available IDs:', samlConfigs.map(c => c.id));
+
+    // Use loose equality to handle both string and number IDs (PostgreSQL returns BIGINT as string)
+    let config = samlConfigs.find(c => c.id == requestedId);
 
     // If config not in memory, try reloading from DB (server may have restarted)
     if (!config) {
       console.log('Config not in memory, reloading from DB...');
       await loadSamlConfigsFromDb();
-      config = samlConfigs.find(c => c.id === parseInt(req.params.id));
+      config = samlConfigs.find(c => c.id == requestedId);
+      console.log('After reload - configs count:', samlConfigs.length);
+      console.log('After reload - available IDs:', samlConfigs.map(c => c.id));
     }
 
     if (!config) {
+      console.log('Config not in memory, trying direct DB query...');
+      // Direct DB lookup as final fallback
+      try {
+        const { rows } = await pool.query(
+          'SELECT * FROM saml_configs WHERE id = $1',
+          [requestedId]
+        );
+        if (rows.length > 0) {
+          console.log('Found config in DB via direct query:', rows[0].id);
+          config = rows[0];
+        }
+      } catch (dbError) {
+        console.error('Direct DB query failed:', dbError);
+      }
+    }
+
+    if (!config) {
+      console.log('Config still not found after all attempts');
       return res.status(404).json({ message: 'SAML configuration not found' });
     }
 
