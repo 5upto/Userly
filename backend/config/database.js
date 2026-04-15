@@ -54,6 +54,27 @@ const initDatabase = async () => {
       ADD COLUMN IF NOT EXISTS idp_slo_url TEXT
     `);
 
+    // Create user_sessions table for tracking active SAML sessions (for Graph API polling)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        token TEXT NOT NULL,
+        auth_type TEXT DEFAULT 'saml',
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        invalidated_at TIMESTAMPTZ NULL
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token)
+    `);
+
     // Set supto.shawon2002@gmail.com as Super Admin
     await client.query(`
       UPDATE users 

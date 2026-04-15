@@ -8,6 +8,7 @@ const { initDatabase } = require('./config/database');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const samlRoutes = require('./routes/saml');
+const { startUserStatusPolling } = require('./services/graphApi');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -74,6 +75,9 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Health check available at http://localhost:${PORT}/api/health`);
+
+      // Start Microsoft Graph API polling for Entra user status
+      startUserStatusPolling();
     });
   } catch (error) {
     console.error('Failed to start server:', error);

@@ -486,6 +486,19 @@ async function handleSamlUser(profile, res) {
     registerUserSession(user.id, token);
     registerUserSession(user.id, refreshToken);
 
+    // Save sessions to database for Graph API polling
+    try {
+      await pool.query(
+        `INSERT INTO user_sessions (user_id, token, auth_type, is_active)
+         VALUES ($1, $2, 'saml', true),
+                ($1, $3, 'saml', true)
+         ON CONFLICT (token) DO UPDATE SET is_active = true`,
+        [user.id, token, refreshToken]
+      );
+    } catch (dbError) {
+      console.error('Failed to save user session to DB:', dbError);
+    }
+
     console.log('JWT token generated successfully (15min expiry)');
 
     // Redirect to frontend with token and refresh token

@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
+const { checkUserStatusInEntra } = require('../services/graphApi');
 
 // Token blacklist for IdP-initiated SLO (in production, use Redis/DB)
 const tokenBlacklist = new Set();
@@ -61,6 +62,31 @@ const authenticateToken = async (req, res, next) => {
     const user = users[0];
     if (user.status === 'blocked') {
       return res.status(403).json({ message: 'Account blocked', redirect: true });
+    }
+
+    // For SAML users, optionally check real-time status in Entra (if Graph API configured)
+    // This enables instant detection of blocks but adds ~200-500ms to API calls
+    if (decoded.authType === 'saml' && process.env.GRAPH_CLIENT_ID) {
+      try {
+        const entraStatus = await checkUserStatusInEntra(user.email);
+        if (entraStatus && entraStatus.blocked) {
+          console.log(`Real-time block detected for ${user.email} in Entra`);
+
+          // Blacklist current token
+          blacklistToken(token);
+
+          // Update local user status
+          await pool.query('UPDATE users SET status = $1 WHERE id = $2', ['blocked', user.id]);
+
+          return res.status(403).json({
+            message: 'Account blocked in Entra ID',
+            redirect: true
+          });
+        }
+      } catch (graphError) {
+        // Don't fail the request if Graph API check fails
+        console.error('Graph API real-time check failed:', graphError.message);
+      }
     }
 
     req.user = user;
