@@ -174,7 +174,7 @@ async function getServicePrincipalId(appId, accessToken) {
   return new Promise((resolve) => {
     const options = {
       hostname: 'graph.microsoft.com',
-      path: `/v1.0/servicePrincipals?$filter=appId eq '${appId}'&$select=id`,
+      path: `/v1.0/servicePrincipals?$filter=appId%20eq%20'${encodeURIComponent(appId)}'&$select=id`,
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
