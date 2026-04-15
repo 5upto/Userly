@@ -11,6 +11,7 @@ const SamlConfig = () => {
     allowedDomains: '',
     issuerUrl: '',
     idpSsoUrl: '',
+    idpSloUrl: '',
     idpCertificate: '',
     metadataFile: null
   });
@@ -53,6 +54,7 @@ const SamlConfig = () => {
       formData.append('allowedDomains', config.allowedDomains);
       formData.append('issuerUrl', config.issuerUrl);
       formData.append('idpSsoUrl', config.idpSsoUrl);
+      formData.append('idpSloUrl', config.idpSloUrl);
       formData.append('idpCertificate', config.idpCertificate);
       if (config.metadataFile) {
         formData.append('metadataFile', config.metadataFile);
@@ -74,6 +76,7 @@ const SamlConfig = () => {
         allowedDomains: '',
         issuerUrl: '',
         idpSsoUrl: '',
+        idpSloUrl: '',
         idpCertificate: '',
         metadataFile: null
       });
@@ -200,6 +203,9 @@ const SamlConfig = () => {
                       <div className="text-sm text-gray-600">
                         <p><strong>Issuer URL:</strong> {cfg.issuer_url}</p>
                         <p><strong>SSO URL:</strong> {cfg.idp_sso_url}</p>
+                        {cfg.idp_slo_url && (
+                          <p><strong>SLO URL:</strong> {cfg.idp_slo_url}</p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -287,6 +293,19 @@ const SamlConfig = () => {
                       placeholder="https://login.microsoftonline.com/{tenant-id}/saml2"
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                     />
+                  </div>
+
+                  <div className="mt-4">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">IdP SLO URL (Logout)</label>
+                    <input
+                      type="text"
+                      name="idpSloUrl"
+                      value={config.idpSloUrl}
+                      onChange={handleInputChange}
+                      placeholder="https://login.microsoftonline.com/{tenant-id}/saml2/logout"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                    <p className="mt-1 text-sm text-gray-500">Single Logout URL for true SLO (auto-extracted from metadata)</p>
                   </div>
 
                   <div className="mt-4">

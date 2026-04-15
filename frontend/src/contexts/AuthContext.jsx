@@ -132,7 +132,39 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    const userData = localStorage.getItem('user');
+    const userEmail = userData ? JSON.parse(userData).email : null;
+
+    // Check if any SAML provider has SLO configured
+    try {
+      const response = await fetch('https://userly-341i.onrender.com/api/saml/providers');
+      const providers = await response.json();
+      const sloProvider = providers.find(p => p.idp_slo_url);
+
+      if (sloProvider) {
+        // Redirect to SP-initiated SLO endpoint
+        const apiBaseUrl = 'https://userly-341i.onrender.com';
+        const sloUrl = `${apiBaseUrl}/api/saml/logout/${sloProvider.id}${userEmail ? `?nameID=${encodeURIComponent(userEmail)}` : ''}`;
+        console.log('Initiating SLO to IdP:', sloUrl);
+
+        // Clear local session first
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setUser(null);
+        setToken(null);
+        delete api.defaults.headers.common['Authorization'];
+        sessionStorage.removeItem('samlRedirected');
+
+        // Redirect to IdP logout
+        window.location.href = sloUrl;
+        return;
+      }
+    } catch (error) {
+      console.error('Failed to check SLO configuration:', error);
+    }
+
+    // No SLO configured, do local logout only
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);

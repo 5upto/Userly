@@ -46,6 +46,7 @@ const loadSamlConfigsFromDb = async () => {
         allowed_domains: row.allowed_domains,
         issuer_url: row.issuer_url,
         idp_sso_url: row.idp_sso_url,
+        idp_slo_url: row.idp_slo_url,
         idp_certificate: row.idp_certificate,
         created_at: row.created_at
       }));
@@ -143,7 +144,8 @@ router.get('/providers', (req, res) => {
   const providers = samlConfigs.map(c => ({
     id: c.id,
     saml_name: c.saml_name,
-    allowed_domains: c.allowed_domains
+    allowed_domains: c.allowed_domains,
+    idp_slo_url: c.idp_slo_url
   }));
   res.json(providers);
 });
@@ -176,7 +178,7 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
     console.log('SAML config save request received');
     console.log('Request body keys:', Object.keys(req.body));
     console.log('Has file:', !!req.file);
-    const { samlName, allowedDomains, issuerUrl, idpSsoUrl, idpCertificate } = req.body;
+    const { samlName, allowedDomains, issuerUrl, idpSsoUrl, idpSloUrl, idpCertificate } = req.body;
     console.log('Config name:', samlName);
 
     // Parse metadata file if provided
@@ -197,7 +199,11 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
         if (!idpCertificate && parsedMetadata.EntityDescriptor?.IDPSSODescriptor?.[0]?.KeyDescriptor?.[0]?.KeyInfo?.[0]?.X509Data?.[0]?.X509Certificate?.[0]) {
           req.body.idpCertificate = parsedMetadata.EntityDescriptor.IDPSSODescriptor[0].KeyDescriptor[0].KeyInfo[0].X509Data[0].X509Certificate[0];
         }
-        
+        // Extract SingleLogoutService URL from metadata
+        if (!idpSloUrl && parsedMetadata.EntityDescriptor?.IDPSSODescriptor?.[0]?.SingleLogoutService?.[0]?.['$']?.Location) {
+          req.body.idpSloUrl = parsedMetadata.EntityDescriptor.IDPSSODescriptor[0].SingleLogoutService[0]['$'].Location;
+        }
+
         // Clean up uploaded file
         fs.unlinkSync(req.file.path);
       } catch (parseError) {
@@ -216,6 +222,7 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
       allowed_domains: allowedDomains,
       issuer_url: req.body.issuerUrl || issuerUrl,
       idp_sso_url: req.body.idpSsoUrl || idpSsoUrl,
+      idp_slo_url: req.body.idpSloUrl || idpSloUrl,
       idp_certificate: req.body.idpCertificate || idpCertificate,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -224,18 +231,19 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
     // Save to database for persistence
     try {
       const { rows } = await pool.query(
-        `INSERT INTO saml_configs (id, saml_name, allowed_domains, issuer_url, idp_sso_url, idp_certificate, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO saml_configs (id, saml_name, allowed_domains, issuer_url, idp_sso_url, idp_slo_url, idp_certificate, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (id) DO UPDATE SET
            saml_name = EXCLUDED.saml_name,
            allowed_domains = EXCLUDED.allowed_domains,
            issuer_url = EXCLUDED.issuer_url,
            idp_sso_url = EXCLUDED.idp_sso_url,
+           idp_slo_url = EXCLUDED.idp_slo_url,
            idp_certificate = EXCLUDED.idp_certificate,
            updated_at = NOW()
          RETURNING *`,
-        [config.id, config.saml_name, config.allowed_domains, config.issuer_url, 
-         config.idp_sso_url, config.idp_certificate, config.created_at]
+        [config.id, config.saml_name, config.allowed_domains, config.issuer_url,
+         config.idp_sso_url, config.idp_slo_url, config.idp_certificate, config.created_at]
       );
       console.log('SAML config saved to database:', rows[0].id);
     } catch (dbError) {
@@ -455,10 +463,64 @@ router.get('/acs', (req, res) => {
   res.redirect('https://userly-pro.vercel.app/login');
 });
 
-// SAML SLO (Single Logout) endpoint
+// Build logout URL with NameID for redirect to IdP
+function buildLogoutUrl(config, nameID) {
+  if (!config.idp_slo_url) {
+    return null;
+  }
+  
+  const logoutUrl = new URL(config.idp_slo_url);
+  // Add NameID parameter for Entra ID SLO
+  if (nameID) {
+    logoutUrl.searchParams.append('logout_hint', nameID);
+  }
+  // Add RelayState for redirect back after logout
+  logoutUrl.searchParams.append('RelayState', 'https://userly-pro.vercel.app/login?logout=success');
+  
+  return logoutUrl.toString();
+}
+
+// SP-initiated Single Logout endpoint
+// Called by frontend when user clicks logout
+router.get('/logout/:id', (req, res) => {
+  try {
+    const config = samlConfigs.find(c => c.id === parseInt(req.params.id));
+    
+    if (!config) {
+      return res.status(404).json({ message: 'SAML configuration not found' });
+    }
+    
+    if (!config.idp_slo_url) {
+      return res.status(400).json({ message: 'SLO not configured for this provider' });
+    }
+    
+    // Get email/NameID from query param (passed by frontend)
+    const nameID = req.query.nameID;
+    
+    // Build and redirect to IdP logout URL
+    const logoutUrl = buildLogoutUrl(config, nameID);
+    console.log('Redirecting to IdP logout:', logoutUrl);
+    
+    res.redirect(logoutUrl);
+  } catch (error) {
+    console.error('SAML logout error:', error);
+    res.status(500).json({ message: 'Logout failed', error: error.message });
+  }
+});
+
+// IdP-initiated Single Logout endpoint (receives logout from IdP)
+router.post('/slo', (req, res) => {
+  console.log('IdP-initiated SLO received:', req.body);
+  // Entra ID sends a SAML LogoutResponse here
+  // For now, just redirect to login page
+  // In production, validate the SAML LogoutResponse
+  res.redirect('https://userly-pro.vercel.app/login?logout=success');
+});
+
+// GET handler for SLO (some IdPs use GET for logout responses)
 router.get('/slo', (req, res) => {
-  // Handle single logout
-  res.send('SAML SLO endpoint');
+  console.log('SLO GET received:', req.query);
+  res.redirect('https://userly-pro.vercel.app/login?logout=success');
 });
 
 module.exports = router;

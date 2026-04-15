@@ -48,6 +48,12 @@ const initDatabase = async () => {
       ADD COLUMN IF NOT EXISTS role TEXT CHECK (role IN ('user','admin','super_admin')) DEFAULT 'user'
     `);
 
+    // Migration: Add idp_slo_url column for Single Logout support
+    await client.query(`
+      ALTER TABLE saml_configs 
+      ADD COLUMN IF NOT EXISTS idp_slo_url TEXT
+    `);
+
     // Set supto.shawon2002@gmail.com as Super Admin
     await client.query(`
       UPDATE users 
