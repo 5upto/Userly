@@ -402,12 +402,17 @@ router.post('/acs', (req, res, next) => {
 
 async function handleSamlUser(profile, res, configId) {
   try {
+    console.log('Full SAML profile received:', JSON.stringify(profile, null, 2));
+    
+    // For Entra ID, nameID might not be in profile.nameID - use email as fallback
     const email = profile.nameID || profile.email;
     const name = profile.displayName || profile.name || email.split('@')[0];
-    const nameID = profile.nameID;
-    const sessionIndex = profile.sessionIndex;
+    
+    // Entra ID often doesn't provide nameID in profile - use email as NameID
+    const nameID = profile.nameID || profile.email || email;
+    const sessionIndex = profile.sessionIndex || null;
 
-    console.log('Extracted user info - email:', email, 'name:', name, 'sessionIndex:', sessionIndex);
+    console.log('Extracted user info - email:', email, 'name:', name, 'nameID:', nameID, 'sessionIndex:', sessionIndex);
 
     // Check if user exists
     const { rows: existingUsers } = await pool.query(
