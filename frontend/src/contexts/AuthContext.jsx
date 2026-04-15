@@ -135,35 +135,40 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     const token = localStorage.getItem('token');
     
+    // DEBUG: Check token contents
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        console.log('Logout - Token authMethod:', payload.authMethod);
+        console.log('Logout - Token samlNameID:', payload.samlNameID);
+        console.log('Logout - Token samlConfigId:', payload.samlConfigId);
+      } catch (e) {
+        console.log('Logout - Could not parse token');
+      }
+    }
+    
     if (token) {
       try {
         // Call backend logout endpoint to initiate SLO if user is SAML-authenticated
-        const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'https://userly-341i.onrender.com';
-        const response = await fetch(`${apiBaseUrl}/saml/logout`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        });
+        // Use api service which has correct baseURL configured
+        const response = await api.post('/saml/logout');
+        const data = response.data;
         
-        if (response.ok) {
-          const data = await response.json();
-          
-          // Clear local storage first
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          setUser(null);
-          setToken(null);
-          delete api.defaults.headers.common['Authorization'];
-          sessionStorage.removeItem('samlRedirected');
-          
-          // If SLO was initiated, redirect to IdP logout URL
-          if (data.sloInitiated && data.redirectUrl) {
-            console.log('SLO initiated, redirecting to IdP:', data.redirectUrl);
-            window.location.href = data.redirectUrl;
-            return;
-          }
+        console.log('Logout - Response:', data);
+        
+        // Clear local storage first
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setUser(null);
+        setToken(null);
+        delete api.defaults.headers.common['Authorization'];
+        sessionStorage.removeItem('samlRedirected');
+        
+        // If SLO was initiated, redirect to IdP logout URL
+        if (data.sloInitiated && data.redirectUrl) {
+          console.log('SLO initiated, redirecting to IdP:', data.redirectUrl);
+          window.location.href = data.redirectUrl;
+          return;
         }
       } catch (error) {
         console.error('SLO logout error:', error);

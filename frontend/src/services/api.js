@@ -16,8 +16,22 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.data?.redirect) {
+      // Handle session revocation (SLO or blocked)
+      const reason = error.response?.data?.reason;
+      const message = error.response?.data?.message;
+      
       localStorage.removeItem('token');
-      window.location.href = '/login';
+      localStorage.removeItem('user');
+      
+      if (reason === 'blocked') {
+        // Show blocked message
+        window.location.href = '/login?error=account_blocked&message=' + encodeURIComponent(message || 'Account blocked');
+      } else if (reason === 'logout') {
+        // Session terminated from IdP
+        window.location.href = '/login?message=' + encodeURIComponent(message || 'Session logged out');
+      } else {
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }
