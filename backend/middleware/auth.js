@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
-const { checkUserStatusInEntra, checkUserAppAccess, checkAuditLogsForGroupRemoval } = require('../services/graphApi');
+const { checkUserStatusInEntra, checkUserAppAccess, getRecentGroupRemovals } = require('../services/graphApi');
 
 // Token blacklist for IdP-initiated SLO (in production, use Redis/DB)
 const tokenBlacklist = new Set();
@@ -85,7 +85,29 @@ const authenticateToken = async (req, res, next) => {
           });
         }
 
-        // Check 2: Does user still have app access (security group membership)?
+        // Check 2: Check audit logs for recent group removal
+        const securityGroupId = process.env.SAML_SECURITY_GROUP_ID;
+        if (securityGroupId) {
+          const removedUsers = await getRecentGroupRemovals(securityGroupId);
+          if (removedUsers.some(email => email.toLowerCase() === user.email.toLowerCase())) {
+            console.log(`Audit log: User ${user.email} was removed from security group`);
+
+            // Blacklist current token
+            blacklistToken(token);
+
+            // Update local user status
+            await pool.query('UPDATE users SET status = $1 WHERE id = $2', ['blocked', user.id]);
+
+            return res.status(403).json({
+              message: 'Access revoked: User removed from security group',
+              redirect: true,
+              forceReauth: true,
+              reason: 'security_group'
+            });
+          }
+        }
+
+        // Check 3: Does user still have app access (security group membership)?
         const samlAppClientId = process.env.SAML_APP_CLIENT_ID;
         if (samlAppClientId) {
           const appAccess = await checkUserAppAccess(user.email, samlAppClientId);

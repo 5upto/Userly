@@ -25,8 +25,8 @@ api.interceptors.response.use(
       // Determine the appropriate message and reason
       const isSecurityGroup = message?.includes('security group');
       const toastMessage = isSecurityGroup
-        ? 'Your access has been revoked. You were removed from the security group.'
-        : 'Your account has been blocked in Entra ID. Logging out...';
+        ? 'Your access has been revoked.'
+        : 'Session has expired.';
 
       // Show toast immediately
       toast.error(toastMessage);

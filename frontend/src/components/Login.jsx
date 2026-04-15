@@ -20,9 +20,9 @@ const Login = () => {
     if (searchParams.get('blocked') === 'true') {
       const reason = searchParams.get('reason');
       if (reason === 'security_group') {
-        setBlockedMessage('Your access has been revoked. You were removed from the security group that grants access to this application. Please contact your administrator.');
+        setBlockedMessage('Your access has been revoked for this application. Contact your support person to unlock it, then try again.');
       } else {
-        setBlockedMessage('Your account has been blocked in Entra ID. Please contact your administrator.');
+        setBlockedMessage('Your account has been locked. Contact your support person to unlock it, then try again.');
       }
     }
   }, [searchParams]);
