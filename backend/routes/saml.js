@@ -8,7 +8,7 @@ const passport = require('passport');
 const SamlStrategy = require('passport-saml').Strategy;
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
-const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { authenticateToken, requireAdmin, blacklistToken } = require('../middleware/auth');
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../uploads');
@@ -27,6 +27,28 @@ let samlConfigs = [];
 
 // Store strategies by config ID
 const strategies = {};
+
+// Session tracking for IdP-initiated SLO: userId -> Set of active tokens
+const userSessions = new Map();
+
+// Register a token for a user session (called after successful SAML login)
+function registerUserSession(userId, token) {
+  if (!userSessions.has(userId)) {
+    userSessions.set(userId, new Set());
+  }
+  userSessions.get(userId).add(token);
+  console.log('Registered session for user:', userId);
+}
+
+// Invalidate all tokens for a user (called during IdP-initiated SLO)
+function invalidateUserSessions(userId) {
+  const tokens = userSessions.get(userId);
+  if (tokens) {
+    tokens.forEach(token => blacklistToken(token));
+    userSessions.delete(userId);
+    console.log('Invalidated all sessions for user:', userId);
+  }
+}
 
 // Load SAML configs from database on startup
 const loadSamlConfigsFromDb = async () => {
@@ -459,6 +481,10 @@ async function handleSamlUser(profile, res) {
       { expiresIn: '24h' }
     );
 
+    // Register session for IdP-initiated SLO tracking
+    registerUserSession(user.id, token);
+    registerUserSession(user.id, refreshToken);
+
     console.log('JWT token generated successfully (15min expiry)');
 
     // Redirect to frontend with token and refresh token
@@ -583,19 +609,170 @@ router.get('/logout/:id', async (req, res) => {
   }
 });
 
+// Parse SAML LogoutRequest from IdP
+async function parseLogoutRequest(samlRequest) {
+  try {
+    // Decode base64 + inflate
+    const buffer = Buffer.from(samlRequest, 'base64');
+    const inflated = zlib.inflateRawSync(buffer);
+    const xml = inflated.toString('utf8');
+    console.log('Received LogoutRequest XML:', xml.substring(0, 500));
+
+    // Parse XML
+    const parser = new xml2js.Parser({ explicitArray: false });
+    const result = await parser.parseStringPromise(xml);
+
+    const logoutRequest = result['samlp:LogoutRequest'] || result.LogoutRequest;
+    if (!logoutRequest) {
+      throw new Error('Invalid LogoutRequest');
+    }
+
+    // Extract NameID (the user being logged out)
+    const nameID = logoutRequest['saml:NameID'] || logoutRequest.NameID;
+    const issuer = logoutRequest['saml:Issuer'] || logoutRequest.Issuer;
+
+    return {
+      id: logoutRequest.$.ID,
+      issuer: typeof issuer === 'string' ? issuer : issuer?._,
+      nameID: typeof nameID === 'string' ? nameID : nameID?._,
+      destination: logoutRequest.$.Destination
+    };
+  } catch (error) {
+    console.error('Failed to parse LogoutRequest:', error);
+    return null;
+  }
+}
+
+// Build SAML LogoutResponse XML
+function buildLogoutResponse(inResponseTo, destination, status = 'urn:oasis:names:tc:SAML:2.0:status:Success') {
+  const id = '_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  const issueInstant = new Date().toISOString();
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<samlp:LogoutResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+                      xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+                      ID="${id}"
+                      InResponseTo="${inResponseTo}"
+                      Version="2.0"
+                      IssueInstant="${issueInstant}"
+                      Destination="${destination}">
+  <saml:Issuer>https://userly-341i.onrender.com</saml:Issuer>
+  <samlp:Status>
+    <samlp:StatusCode Value="${status}"/>
+  </samlp:Status>
+</samlp:LogoutResponse>`;
+}
+
 // IdP-initiated Single Logout endpoint (receives logout from IdP)
-router.post('/slo', (req, res) => {
+router.post('/slo', async (req, res) => {
   console.log('IdP-initiated SLO received:', req.body);
-  // Entra ID sends a SAML LogoutResponse here
-  // For now, just redirect to login page
-  // In production, validate the SAML LogoutResponse
-  res.redirect('https://userly-pro.vercel.app/login?logout=success');
+
+  const { SAMLRequest, SAMLResponse, RelayState } = req.body;
+
+  // Handle LogoutRequest from IdP
+  if (SAMLRequest) {
+    const logoutData = await parseLogoutRequest(SAMLRequest);
+    if (!logoutData) {
+      return res.status(400).send('Invalid LogoutRequest');
+    }
+
+    console.log('IdP-initiated logout for user:', logoutData.nameID);
+
+    // Find user in database and invalidate their sessions
+    try {
+      const { rows } = await pool.query(
+        'SELECT id, email FROM users WHERE email = $1',
+        [logoutData.nameID]
+      );
+
+      if (rows.length > 0) {
+        const user = rows[0];
+        console.log('Invalidating all sessions for user:', user.email);
+
+        // Blacklist all tokens for this user - they will be rejected on next API call
+        invalidateUserSessions(user.id);
+      } else {
+        console.log('User not found in database:', logoutData.nameID);
+      }
+    } catch (error) {
+      console.error('Database error during SLO:', error);
+    }
+
+    // Build and return LogoutResponse
+    const logoutResponse = buildLogoutResponse(logoutData.id, logoutData.issuer);
+    console.log('Sending LogoutResponse');
+
+    res.set('Content-Type', 'application/xml');
+    return res.send(logoutResponse);
+  }
+
+  // Handle LogoutResponse from IdP (response to our logout request)
+  if (SAMLResponse) {
+    console.log('Received LogoutResponse from IdP');
+    // Parse and validate if needed
+    return res.redirect('https://userly-pro.vercel.app/login?logout=success');
+  }
+
+  res.status(400).send('Invalid SLO request');
 });
 
-// GET handler for SLO (some IdPs use GET for logout responses)
-router.get('/slo', (req, res) => {
+// GET handler for SLO (Entra uses GET for logout requests/responses)
+router.get('/slo', async (req, res) => {
   console.log('SLO GET received:', req.query);
-  res.redirect('https://userly-pro.vercel.app/login?logout=success');
+
+  const { SAMLRequest, SAMLResponse, RelayState } = req.query;
+
+  // Handle LogoutRequest from IdP
+  if (SAMLRequest) {
+    const logoutData = await parseLogoutRequest(SAMLRequest);
+    if (!logoutData) {
+      return res.redirect('https://userly-pro.vercel.app/login?error=invalid_slo');
+    }
+
+    console.log('IdP-initiated logout (GET) for user:', logoutData.nameID);
+
+    // Invalidate user sessions
+    try {
+      const { rows } = await pool.query(
+        'SELECT id, email FROM users WHERE email = $1',
+        [logoutData.nameID]
+      );
+      if (rows.length > 0) {
+        invalidateUserSessions(rows[0].id);
+      }
+    } catch (error) {
+      console.error('Database error during SLO GET:', error);
+    }
+
+    // Build LogoutResponse and redirect back to IdP
+    const logoutResponse = buildLogoutResponse(logoutData.id, logoutData.issuer);
+    const deflated = zlib.deflateRawSync(Buffer.from(logoutResponse, 'utf8'));
+    const encodedResponse = deflated.toString('base64');
+
+    // Determine where to send the response (usually back to IdP)
+    const idpConfig = samlConfigs.find(c => c.idp_entity_id === logoutData.issuer);
+    const sloUrl = idpConfig?.idp_slo_url || logoutData.destination;
+
+    if (sloUrl && sloUrl !== 'https://userly-341i.onrender.com') {
+      // Send response back to IdP
+      const responseUrl = new URL(sloUrl);
+      responseUrl.searchParams.append('SAMLResponse', encodedResponse);
+      if (RelayState) responseUrl.searchParams.append('RelayState', RelayState);
+
+      return res.redirect(responseUrl.toString());
+    }
+
+    // If no return URL, just redirect to login
+    return res.redirect('https://userly-pro.vercel.app/login?logout=success');
+  }
+
+  // Handle LogoutResponse from IdP
+  if (SAMLResponse) {
+    console.log('Received LogoutResponse from IdP (GET)');
+    return res.redirect('https://userly-pro.vercel.app/login?logout=success');
+  }
+
+  res.redirect('https://userly-pro.vercel.app/login?error=invalid_slo');
 });
 
 module.exports = router;
