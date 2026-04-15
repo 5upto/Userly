@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { toast } from 'react-toastify';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
@@ -14,11 +15,44 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.data?.redirect) {
+  async (error) => {
+    const status = error.response?.status;
+    const message = error.response?.data?.message;
+    const redirect = error.response?.data?.redirect;
+
+    // Handle Entra block detection with toast
+    if (status === 403 && message?.includes('blocked')) {
+      // Show toast immediately
+      toast.error('Your account has been blocked in Entra ID. Logging out...', {
+        position: 'top-center',
+        autoClose: 3000,
+        hideProgressBar: false,
+        closeOnClick: false,
+        pauseOnHover: false,
+        draggable: false,
+        theme: 'colored',
+      });
+
+      // Wait for toast to be visible then redirect
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Clear tokens and redirect
+      localStorage.removeItem('token');
+      localStorage.removeItem('refreshToken');
+      localStorage.removeItem('user');
+      window.location.href = '/login?blocked=true';
+
+      // Return a never-resolving promise to prevent further processing
+      return new Promise(() => {});
+    }
+
+    // Handle other redirect cases (token expired, etc.)
+    if (redirect) {
       localStorage.removeItem('token');
       window.location.href = '/login';
+      return new Promise(() => {});
     }
+
     return Promise.reject(error);
   }
 );

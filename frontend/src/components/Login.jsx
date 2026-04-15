@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-toastify';
 
@@ -9,9 +9,18 @@ const Login = () => {
     password: ''
   });
   const [loading, setLoading] = useState(false);
-  
+  const [blockedMessage, setBlockedMessage] = useState('');
+
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    // Check if user was redirected due to being blocked in Entra
+    if (searchParams.get('blocked') === 'true') {
+      setBlockedMessage('Your account has been blocked in Entra ID. Please contact your administrator.');
+    }
+  }, [searchParams]);
 
   const handleChange = (e) => {
     setFormData({
@@ -52,6 +61,16 @@ const Login = () => {
           <p className="text-gray-600">Welcome back! Please enter your details.</p>
         </div>
         <form className="space-y-6" onSubmit={handleSubmit}>
+          {blockedMessage && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+              <div className="flex items-center">
+                <svg className="w-5 h-5 text-red-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="text-red-700 font-medium">{blockedMessage}</span>
+              </div>
+            </div>
+          )}
           <div className="rounded-md shadow-sm -space-y-px">
             <div>
               <label htmlFor="email" className="sr-only">
