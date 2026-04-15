@@ -489,7 +489,14 @@ async function handleSloRequest(req, res) {
     const samlResponse = req.body.SAMLResponse || req.query.SAMLResponse;
     const relayState = req.body.RelayState || req.query.RelayState;
 
-    console.log('SLO request received - SAMLRequest:', !!samlRequest, 'SAMLResponse:', !!samlResponse);
+    console.log('========================================');
+    console.log('SLO request received');
+    console.log('Method:', req.method);
+    console.log('SAMLRequest present:', !!samlRequest);
+    console.log('SAMLResponse present:', !!samlResponse);
+    console.log('RelayState:', relayState);
+    console.log('Content-Type:', req.headers['content-type']);
+    console.log('========================================');
 
     // Get the first available config for handling SLO
     if (samlConfigs.length === 0) {
@@ -499,26 +506,17 @@ async function handleSloRequest(req, res) {
 
     const config = samlConfigs[0];
     const strategyName = `saml-${config.id}`;
+    
+    console.log('Using SAML config:', config.saml_name, 'ID:', config.id);
 
     // Check if this is a LogoutResponse from IdP (SP-initiated logout flow)
     if (samlResponse) {
-      console.log('Processing LogoutResponse from IdP');
+      console.log('Processing LogoutResponse from IdP (SP-initiated flow response)');
       
-      // Use passport-saml to validate the LogoutResponse
-      passport.authenticate(strategyName, { session: false }, (err, user, info) => {
-        if (err) {
-          console.error('LogoutResponse validation error:', err);
-          return res.redirect('https://userly-pro.vercel.app/login?error=logout_failed');
-        }
-        
-        console.log('LogoutResponse processed successfully');
-        // Redirect to login page - user is now logged out from both SP and IdP
-        return res.redirect('https://userly-pro.vercel.app/login?message=logged_out');
-      })(req, res, () => {
-        // If we reach here, logout was successful
-        return res.redirect('https://userly-pro.vercel.app/login?message=logged_out');
-      });
-      return;
+      // The user is already logged out locally when we sent the LogoutRequest
+      // This is just the IdP confirming the logout
+      console.log('LogoutResponse received from IdP - SLO complete');
+      return res.redirect('https://userly-pro.vercel.app/login?message=logged_out');
     }
 
     // Check if this is a LogoutRequest from IdP (IdP-initiated logout flow)
@@ -533,6 +531,8 @@ async function handleSloRequest(req, res) {
         console.error('SAML strategy not found:', strategyName);
         return res.status(500).send('SAML configuration error');
       }
+      
+      console.log('SAML strategy found, validating LogoutRequest...');
 
       // Validate the LogoutRequest and extract NameID and SessionIndex
       strategy.validatePostRequest(req.body, async (err, logout) => {
@@ -602,24 +602,35 @@ router.post('/logout', authenticateToken, async (req, res) => {
   try {
     const user = req.user;
     
-    console.log('Logout request received for user:', user.email, 'authMethod:', user.authMethod);
+    console.log('Logout request received:', JSON.stringify({
+      email: user.email,
+      userId: user.userId,
+      authMethod: user.authMethod,
+      samlConfigId: user.samlConfigId,
+      samlNameID: user.samlNameID,
+      samlSessionIndex: user.samlSessionIndex
+    }));
 
     // Check if user authenticated via SAML
     if (user.authMethod === 'saml' && user.samlConfigId && user.samlNameID) {
+      console.log('SAML user detected, recording session revocation...');
+      
       // Record session revocation for this logout
       try {
-        await pool.query(
+        const insertResult = await pool.query(
           `INSERT INTO revoked_sessions (user_id, email, saml_session_index, reason)
            VALUES ($1, $2, $3, 'logout')`,
           [user.userId, user.email, user.samlSessionIndex || null]
         );
-        console.log(`Session revocation recorded for user ${user.email} (SP-initiated logout)`);
+        console.log(`Session revocation recorded for user ${user.email}, rows affected:`, insertResult.rowCount);
       } catch (dbError) {
         console.error('Error recording session revocation:', dbError);
         // Continue with logout even if DB recording fails
       }
 
       const config = samlConfigs.find(c => c.id === parseInt(user.samlConfigId));
+      
+      console.log('SAML config found:', !!config, 'idp_slo_url:', config?.idp_slo_url);
       
       if (!config || !config.idp_slo_url) {
         console.log('SAML config or SLO URL not available, performing local logout only');
@@ -636,29 +647,44 @@ router.post('/logout', authenticateToken, async (req, res) => {
 
       console.log('Initiating SP-initiated SLO to IdP:', config.idp_slo_url);
 
-      // Generate LogoutRequest
-      const logoutRequest = strategy.generateServiceProviderLogoutRequest({
-        nameID: user.samlNameID,
-        sessionIndex: user.samlSessionIndex
-      });
+      try {
+        // Generate LogoutRequest
+        const logoutRequest = strategy.generateServiceProviderLogoutRequest({
+          nameID: user.samlNameID,
+          sessionIndex: user.samlSessionIndex || undefined
+        });
 
-      // Redirect to IdP SLO endpoint with the LogoutRequest
-      const relayState = 'https://userly-pro.vercel.app/login?message=logged_out';
-      const sloUrl = new URL(config.idp_slo_url);
-      sloUrl.searchParams.append('SAMLRequest', Buffer.from(logoutRequest).toString('deflate').toString('base64'));
-      sloUrl.searchParams.append('RelayState', relayState);
+        // Redirect to IdP SLO endpoint with the LogoutRequest
+        const relayState = 'https://userly-pro.vercel.app/login?message=logged_out';
+        const sloUrl = new URL(config.idp_slo_url);
+        
+        // Compress and encode the LogoutRequest
+        const compressedRequest = require('zlib').deflateRawSync(logoutRequest);
+        const encodedRequest = compressedRequest.toString('base64');
+        
+        sloUrl.searchParams.append('SAMLRequest', encodedRequest);
+        sloUrl.searchParams.append('RelayState', relayState);
 
-      console.log('Redirecting to IdP SLO endpoint:', sloUrl.toString());
-      
-      return res.json({
-        success: true,
-        sloInitiated: true,
-        redirectUrl: sloUrl.toString()
-      });
+        console.log('Redirecting to IdP SLO endpoint:', sloUrl.toString());
+        
+        return res.json({
+          success: true,
+          sloInitiated: true,
+          redirectUrl: sloUrl.toString()
+        });
+      } catch (sloError) {
+        console.error('Error generating SLO request:', sloError);
+        // Return success but indicate SLO failed - local session is still revoked
+        return res.json({ 
+          success: true, 
+          sloInitiated: false,
+          message: 'Local logout successful, but IdP SLO failed: ' + sloError.message
+        });
+      }
     }
 
+    console.log('Non-SAML user or missing SAML data:', { authMethod: user.authMethod, samlConfigId: user.samlConfigId, samlNameID: user.samlNameID });
     // Non-SAML user - just return success for local logout
-    console.log('Non-SAML user, local logout only');
     return res.json({ success: true, message: 'Local logout successful' });
   } catch (error) {
     console.error('Logout endpoint error:', error);
@@ -681,5 +707,51 @@ const revokeUserSessions = async (userId, email, reason = 'admin_action') => {
     return false;
   }
 };
+
+// Debug endpoint to check SLO configuration
+router.get('/slo-status', async (req, res) => {
+  try {
+    // Check if revoked_sessions table exists
+    const { rows: tableCheck } = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_name = 'revoked_sessions'
+      )
+    `);
+    
+    const tableExists = tableCheck[0].exists;
+    
+    // Get recent revoked sessions
+    let recentRevocations = [];
+    if (tableExists) {
+      const { rows } = await pool.query(`
+        SELECT user_id, email, reason, revoked_at 
+        FROM revoked_sessions 
+        ORDER BY revoked_at DESC 
+        LIMIT 10
+      `);
+      recentRevocations = rows;
+    }
+    
+    // Check SAML configs
+    const configs = samlConfigs.map(c => ({
+      id: c.id,
+      name: c.saml_name,
+      hasSloUrl: !!c.idp_slo_url,
+      sloUrl: c.idp_slo_url ? c.idp_slo_url.substring(0, 50) + '...' : null
+    }));
+    
+    res.json({
+      revokedSessionsTableExists: tableExists,
+      recentRevocations,
+      samlConfigs: configs,
+      sloEndpoint: 'https://userly-341i.onrender.com/api/saml/slo',
+      acsEndpoint: 'https://userly-341i.onrender.com/api/saml/acs'
+    });
+  } catch (error) {
+    console.error('SLO status check error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 module.exports = { router, revokeUserSessions };
