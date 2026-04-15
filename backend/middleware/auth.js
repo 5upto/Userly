@@ -26,7 +26,50 @@ const authenticateToken = async (req, res, next) => {
       return res.status(403).json({ message: 'Account blocked', redirect: true });
     }
 
-    req.user = user;
+    // For SAML users, check if session has been revoked (SLO or blocked)
+    if (decoded.authMethod === 'saml') {
+      // Check if user has any revoked sessions after their token was issued
+      const { rows: revokedSessions } = await pool.query(
+        `SELECT id, reason, revoked_at FROM revoked_sessions 
+         WHERE user_id = $1 
+         AND revoked_at > $2
+         ORDER BY revoked_at DESC 
+         LIMIT 1`,
+        [decoded.userId, new Date(decoded.iat * 1000)]
+      );
+
+      if (revokedSessions.length > 0) {
+        const session = revokedSessions[0];
+        console.log(`SAML session revoked for user ${user.email}: ${session.reason} at ${session.revoked_at}`);
+        return res.status(403).json({ 
+          message: `Session ${session.reason === 'blocked' ? 'terminated due to account being blocked' : 'logged out from identity provider'}`, 
+          redirect: true,
+          reason: session.reason
+        });
+      }
+
+      // Also check if this specific SAML session index was revoked
+      if (decoded.samlSessionIndex) {
+        const { rows: sessionRevoked } = await pool.query(
+          `SELECT id FROM revoked_sessions 
+           WHERE saml_session_index = $1 
+           AND revoked_at > $2`,
+          [decoded.samlSessionIndex, new Date(decoded.iat * 1000)]
+        );
+
+        if (sessionRevoked.length > 0) {
+          console.log(`Specific SAML session revoked for user ${user.email}, sessionIndex: ${decoded.samlSessionIndex}`);
+          return res.status(403).json({ 
+            message: 'Session terminated from identity provider', 
+            redirect: true,
+            reason: 'logout'
+          });
+        }
+      }
+    }
+
+    // Attach full token data to req.user for potential use in routes
+    req.user = { ...user, ...decoded };
     next();
   } catch (error) {
     return res.status(403).json({ message: 'Invalid token', redirect: true });

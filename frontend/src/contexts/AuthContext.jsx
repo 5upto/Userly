@@ -132,7 +132,46 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    const token = localStorage.getItem('token');
+    
+    if (token) {
+      try {
+        // Call backend logout endpoint to initiate SLO if user is SAML-authenticated
+        const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'https://userly-341i.onrender.com';
+        const response = await fetch(`${apiBaseUrl}/api/saml/logout`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          
+          // Clear local storage first
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setUser(null);
+          setToken(null);
+          delete api.defaults.headers.common['Authorization'];
+          sessionStorage.removeItem('samlRedirected');
+          
+          // If SLO was initiated, redirect to IdP logout URL
+          if (data.sloInitiated && data.redirectUrl) {
+            console.log('SLO initiated, redirecting to IdP:', data.redirectUrl);
+            window.location.href = data.redirectUrl;
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('SLO logout error:', error);
+        // Continue with local logout on error
+      }
+    }
+    
+    // Local logout (non-SAML or SLO not available)
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setUser(null);

@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../config/database');
 const { authenticateToken, requireAdmin, requireSuperAdmin } = require('../middleware/auth');
+const { revokeUserSessions } = require('./saml');
 
 const router = express.Router();
 
@@ -35,12 +36,26 @@ router.patch('/block', authenticateToken, requireAdmin, async (req, res) => {
       return res.status(400).json({ message: 'User IDs are required' });
     }
 
+    // Get user details before blocking for session revocation
+    const { rows: usersToBlock } = await pool.query(
+      'SELECT id, email FROM users WHERE id = ANY($1::int[])',
+      [userIds]
+    );
+
     await pool.query(
       `UPDATE users SET status = 'blocked' WHERE id = ANY($1::int[])`,
       [userIds]
     );
 
-    res.json({ message: 'Users blocked successfully' });
+    // Revoke all active sessions for blocked users (instant logout)
+    for (const user of usersToBlock) {
+      await revokeUserSessions(user.id, user.email, 'blocked');
+    }
+
+    res.json({ 
+      message: 'Users blocked successfully',
+      sessionsRevoked: usersToBlock.length 
+    });
   } catch (error) {
     console.error('Error blocking users:', error);
     res.status(500).json({ message: 'Server error' });

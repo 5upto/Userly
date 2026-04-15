@@ -36,10 +36,37 @@ const initDatabase = async () => {
         allowed_domains TEXT,
         issuer_url TEXT,
         idp_sso_url TEXT NOT NULL,
+        idp_slo_url TEXT,
         idp_certificate TEXT NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
+    `);
+
+    // Migration: Add idp_slo_url column if it doesn't exist
+    await client.query(`
+      ALTER TABLE saml_configs
+      ADD COLUMN IF NOT EXISTS idp_slo_url TEXT
+    `);
+
+    // Create revoked_sessions table for SAML SLO and blocked user tracking
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS revoked_sessions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        email VARCHAR(255) NOT NULL,
+        saml_session_index VARCHAR(255),
+        revoked_at TIMESTAMPTZ DEFAULT NOW(),
+        reason VARCHAR(50) CHECK (reason IN ('logout', 'blocked', 'password_change', 'admin_action'))
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_revoked_sessions_user ON revoked_sessions(user_id)
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_revoked_sessions_session ON revoked_sessions(saml_session_index) WHERE saml_session_index IS NOT NULL
     `);
 
     // Migration: Add role column if it doesn't exist (for existing tables)

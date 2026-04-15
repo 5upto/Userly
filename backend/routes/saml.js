@@ -46,6 +46,7 @@ const loadSamlConfigsFromDb = async () => {
         allowed_domains: row.allowed_domains,
         issuer_url: row.issuer_url,
         idp_sso_url: row.idp_sso_url,
+        idp_slo_url: row.idp_slo_url,
         idp_certificate: row.idp_certificate,
         created_at: row.created_at
       }));
@@ -81,6 +82,8 @@ const getSamlStrategy = (config) => {
       issuer: `userly-${config.id}`,
       cert: config.idp_certificate,
       callbackUrl: 'https://userly-341i.onrender.com/api/saml/acs',
+      logoutUrl: config.idp_slo_url || null,
+      logoutCallbackUrl: 'https://userly-341i.onrender.com/api/saml/slo',
       identifierFormat: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
       passReqToCallback: true
     },
@@ -194,6 +197,13 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
         if (!idpSsoUrl && parsedMetadata.EntityDescriptor?.IDPSSODescriptor?.[0]?.SingleSignOnService?.[0]?.['$']?.Location) {
           req.body.idpSsoUrl = parsedMetadata.EntityDescriptor.IDPSSODescriptor[0].SingleSignOnService[0]['$'].Location;
         }
+        // Extract SingleLogoutService URL from metadata
+        const sloService = parsedMetadata.EntityDescriptor?.IDPSSODescriptor?.[0]?.SingleLogoutService?.find(
+          service => service['$']?.Binding?.includes('HTTP-Redirect')
+        );
+        if (sloService?.['$']?.Location) {
+          req.body.idpSloUrl = sloService['$'].Location;
+        }
         if (!idpCertificate && parsedMetadata.EntityDescriptor?.IDPSSODescriptor?.[0]?.KeyDescriptor?.[0]?.KeyInfo?.[0]?.X509Data?.[0]?.X509Certificate?.[0]) {
           req.body.idpCertificate = parsedMetadata.EntityDescriptor.IDPSSODescriptor[0].KeyDescriptor[0].KeyInfo[0].X509Data[0].X509Certificate[0];
         }
@@ -216,6 +226,7 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
       allowed_domains: allowedDomains,
       issuer_url: req.body.issuerUrl || issuerUrl,
       idp_sso_url: req.body.idpSsoUrl || idpSsoUrl,
+      idp_slo_url: req.body.idpSloUrl || req.body.idpSloUrl,
       idp_certificate: req.body.idpCertificate || idpCertificate,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -224,18 +235,19 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
     // Save to database for persistence
     try {
       const { rows } = await pool.query(
-        `INSERT INTO saml_configs (id, saml_name, allowed_domains, issuer_url, idp_sso_url, idp_certificate, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO saml_configs (id, saml_name, allowed_domains, issuer_url, idp_sso_url, idp_slo_url, idp_certificate, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (id) DO UPDATE SET
            saml_name = EXCLUDED.saml_name,
            allowed_domains = EXCLUDED.allowed_domains,
            issuer_url = EXCLUDED.issuer_url,
            idp_sso_url = EXCLUDED.idp_sso_url,
+           idp_slo_url = EXCLUDED.idp_slo_url,
            idp_certificate = EXCLUDED.idp_certificate,
            updated_at = NOW()
          RETURNING *`,
         [config.id, config.saml_name, config.allowed_domains, config.issuer_url, 
-         config.idp_sso_url, config.idp_certificate, config.created_at]
+         config.idp_sso_url, config.idp_slo_url, config.idp_certificate, config.created_at]
       );
       console.log('SAML config saved to database:', rows[0].id);
     } catch (dbError) {
@@ -295,7 +307,8 @@ router.get('/metadata/:id', (req, res) => {
     <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
     <md:AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="${acsUrl}" index="1"/>
     <md:AssertionConsumerService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="${acsUrl}" index="2"/>
-    <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="${sloUrl}"/>
+    <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="${sloUrl}" index="1"/>
+    <md:SingleLogoutService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="${sloUrl}" index="2"/>
   </md:SPSSODescriptor>
 </md:EntityDescriptor>`;
 
@@ -377,7 +390,7 @@ router.post('/acs', (req, res, next) => {
       console.log('SAML authentication successful, profile:', profile);
       
       // Handle user creation/update and token generation
-      handleSamlUser(profile, res);
+      handleSamlUser(profile, res, config.id);
     })(req, res, next);
   } catch (error) {
     console.error('SAML ACS error:', error);
@@ -387,12 +400,14 @@ router.post('/acs', (req, res, next) => {
   }
 });
 
-async function handleSamlUser(profile, res) {
+async function handleSamlUser(profile, res, configId) {
   try {
     const email = profile.nameID || profile.email;
     const name = profile.displayName || profile.name || email.split('@')[0];
+    const nameID = profile.nameID;
+    const sessionIndex = profile.sessionIndex;
 
-    console.log('Extracted user info - email:', email, 'name:', name);
+    console.log('Extracted user info - email:', email, 'name:', name, 'sessionIndex:', sessionIndex);
 
     // Check if user exists
     const { rows: existingUsers } = await pool.query(
@@ -426,15 +441,24 @@ async function handleSamlUser(profile, res) {
       );
     }
 
-    // Generate JWT token
+    // Generate JWT token with SAML auth method and config ID
     console.log('Generating JWT token...');
     const token = jwt.sign(
-      { userId: user.id, email: user.email, name: user.name, role: user.role || 'standard' },
+      { 
+        userId: user.id, 
+        email: user.email, 
+        name: user.name, 
+        role: user.role || 'standard',
+        authMethod: 'saml',
+        samlConfigId: configId,
+        samlNameID: nameID,
+        samlSessionIndex: sessionIndex
+      },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }
     );
 
-    console.log('JWT token generated successfully');
+    console.log('JWT token generated successfully with SAML metadata');
 
     // Redirect to frontend with token
     const frontendUrl = 'https://userly-pro.vercel.app';
@@ -455,10 +479,207 @@ router.get('/acs', (req, res) => {
   res.redirect('https://userly-pro.vercel.app/login');
 });
 
-// SAML SLO (Single Logout) endpoint
-router.get('/slo', (req, res) => {
-  // Handle single logout
-  res.send('SAML SLO endpoint');
+// SAML SLO (Single Logout) endpoint - handles both IdP-initiated and LogoutResponse
+router.get('/slo', handleSloRequest);
+router.post('/slo', handleSloRequest);
+
+async function handleSloRequest(req, res) {
+  try {
+    const samlRequest = req.body.SAMLRequest || req.query.SAMLRequest;
+    const samlResponse = req.body.SAMLResponse || req.query.SAMLResponse;
+    const relayState = req.body.RelayState || req.query.RelayState;
+
+    console.log('SLO request received - SAMLRequest:', !!samlRequest, 'SAMLResponse:', !!samlResponse);
+
+    // Get the first available config for handling SLO
+    if (samlConfigs.length === 0) {
+      console.error('No SAML configuration found for SLO');
+      return res.redirect('https://userly-pro.vercel.app/login?error=slo_no_config');
+    }
+
+    const config = samlConfigs[0];
+    const strategyName = `saml-${config.id}`;
+
+    // Check if this is a LogoutResponse from IdP (SP-initiated logout flow)
+    if (samlResponse) {
+      console.log('Processing LogoutResponse from IdP');
+      
+      // Use passport-saml to validate the LogoutResponse
+      passport.authenticate(strategyName, { session: false }, (err, user, info) => {
+        if (err) {
+          console.error('LogoutResponse validation error:', err);
+          return res.redirect('https://userly-pro.vercel.app/login?error=logout_failed');
+        }
+        
+        console.log('LogoutResponse processed successfully');
+        // Redirect to login page - user is now logged out from both SP and IdP
+        return res.redirect('https://userly-pro.vercel.app/login?message=logged_out');
+      })(req, res, () => {
+        // If we reach here, logout was successful
+        return res.redirect('https://userly-pro.vercel.app/login?message=logged_out');
+      });
+      return;
+    }
+
+    // Check if this is a LogoutRequest from IdP (IdP-initiated logout flow)
+    if (samlRequest) {
+      console.log('Processing LogoutRequest from IdP (IdP-initiated logout)');
+      
+      // Parse and validate the LogoutRequest
+      const SamlStrategy = require('passport-saml').Strategy;
+      const strategy = passport._strategies[strategyName];
+      
+      if (!strategy) {
+        console.error('SAML strategy not found:', strategyName);
+        return res.status(500).send('SAML configuration error');
+      }
+
+      // Validate the LogoutRequest and extract NameID and SessionIndex
+      strategy.validatePostRequest(req.body, async (err, logout) => {
+        if (err) {
+          console.error('LogoutRequest validation error:', err);
+          return res.status(400).send('Invalid logout request');
+        }
+
+        console.log('LogoutRequest validated - NameID:', logout.nameID, 'SessionIndex:', logout.sessionIndex);
+
+        try {
+          // Find user by email (NameID) and revoke their session
+          const { rows: users } = await pool.query(
+            'SELECT id, email FROM users WHERE email = $1',
+            [logout.nameID]
+          );
+
+          if (users.length > 0) {
+            const user = users[0];
+            // Insert revoked session record
+            await pool.query(
+              `INSERT INTO revoked_sessions (user_id, email, saml_session_index, reason)
+               VALUES ($1, $2, $3, 'logout')`,
+              [user.id, user.email, logout.sessionIndex || null]
+            );
+            console.log(`Session revoked for user ${user.email} (IdP-initiated logout)`);
+          }
+        } catch (dbError) {
+          console.error('Error recording revoked session:', dbError);
+          // Continue with logout even if DB recording fails
+        }
+
+        // Generate LogoutResponse to send back to IdP
+        strategy.generateServiceProviderLogoutResponse(logout, (err, response) => {
+          if (err) {
+            console.error('Error generating LogoutResponse:', err);
+            return res.status(500).send('Error processing logout');
+          }
+
+          console.log('LogoutResponse generated successfully');
+          
+          // Return the LogoutResponse to the IdP
+          res.setHeader('Content-Type', 'text/html');
+          res.send(`
+            <form method="post" action="${config.idp_slo_url || config.idp_sso_url}" id="sloResponseForm">
+              <input type="hidden" name="SAMLResponse" value="${Buffer.from(response).toString('base64')}" />
+              ${relayState ? `<input type="hidden" name="RelayState" value="${relayState}" />` : ''}
+            </form>
+            <script>document.getElementById('sloResponseForm').submit();</script>
+          `);
+        });
+      });
+      return;
+    }
+
+    // No SAML data - just redirect to login
+    console.log('No SAML data in SLO request, redirecting to login');
+    res.redirect('https://userly-pro.vercel.app/login');
+  } catch (error) {
+    console.error('SLO endpoint error:', error);
+    res.redirect('https://userly-pro.vercel.app/login?error=slo_error');
+  }
+}
+
+// SP-initiated logout endpoint
+router.post('/logout', authenticateToken, async (req, res) => {
+  try {
+    const user = req.user;
+    
+    console.log('Logout request received for user:', user.email, 'authMethod:', user.authMethod);
+
+    // Check if user authenticated via SAML
+    if (user.authMethod === 'saml' && user.samlConfigId && user.samlNameID) {
+      // Record session revocation for this logout
+      try {
+        await pool.query(
+          `INSERT INTO revoked_sessions (user_id, email, saml_session_index, reason)
+           VALUES ($1, $2, $3, 'logout')`,
+          [user.userId, user.email, user.samlSessionIndex || null]
+        );
+        console.log(`Session revocation recorded for user ${user.email} (SP-initiated logout)`);
+      } catch (dbError) {
+        console.error('Error recording session revocation:', dbError);
+        // Continue with logout even if DB recording fails
+      }
+
+      const config = samlConfigs.find(c => c.id === parseInt(user.samlConfigId));
+      
+      if (!config || !config.idp_slo_url) {
+        console.log('SAML config or SLO URL not available, performing local logout only');
+        return res.json({ success: true, message: 'Local logout only - IdP SLO not configured' });
+      }
+
+      const strategyName = `saml-${config.id}`;
+      const strategy = passport._strategies[strategyName];
+
+      if (!strategy) {
+        console.error('SAML strategy not found for logout:', strategyName);
+        return res.status(500).json({ error: 'SAML configuration error' });
+      }
+
+      console.log('Initiating SP-initiated SLO to IdP:', config.idp_slo_url);
+
+      // Generate LogoutRequest
+      const logoutRequest = strategy.generateServiceProviderLogoutRequest({
+        nameID: user.samlNameID,
+        sessionIndex: user.samlSessionIndex
+      });
+
+      // Redirect to IdP SLO endpoint with the LogoutRequest
+      const relayState = 'https://userly-pro.vercel.app/login?message=logged_out';
+      const sloUrl = new URL(config.idp_slo_url);
+      sloUrl.searchParams.append('SAMLRequest', Buffer.from(logoutRequest).toString('deflate').toString('base64'));
+      sloUrl.searchParams.append('RelayState', relayState);
+
+      console.log('Redirecting to IdP SLO endpoint:', sloUrl.toString());
+      
+      return res.json({
+        success: true,
+        sloInitiated: true,
+        redirectUrl: sloUrl.toString()
+      });
+    }
+
+    // Non-SAML user - just return success for local logout
+    console.log('Non-SAML user, local logout only');
+    return res.json({ success: true, message: 'Local logout successful' });
+  } catch (error) {
+    console.error('Logout endpoint error:', error);
+    res.status(500).json({ error: 'Logout failed', message: error.message });
+  }
 });
 
-module.exports = router;
+// Helper function to revoke all sessions for a user (used when blocking users)
+const revokeUserSessions = async (userId, email, reason = 'admin_action') => {
+  try {
+    await pool.query(
+      `INSERT INTO revoked_sessions (user_id, email, reason)
+       VALUES ($1, $2, $3)`,
+      [userId, email, reason]
+    );
+    console.log(`All sessions revoked for user ${email} (reason: ${reason})`);
+    return true;
+  } catch (error) {
+    console.error('Error revoking user sessions:', error);
+    return false;
+  }
+};
+
+module.exports = { router, revokeUserSessions };
