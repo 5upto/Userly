@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
-const { checkUserStatusInEntra } = require('../services/graphApi');
+const { checkUserStatusInEntra, checkUserAppAccess } = require('../services/graphApi');
 
 // Token blacklist for IdP-initiated SLO (in production, use Redis/DB)
 const tokenBlacklist = new Set();
@@ -68,6 +68,7 @@ const authenticateToken = async (req, res, next) => {
     // This enables instant detection of blocks but adds ~200-500ms to API calls
     if (decoded.authType === 'saml' && process.env.GRAPH_CLIENT_ID) {
       try {
+        // Check 1: Is user blocked in Entra?
         const entraStatus = await checkUserStatusInEntra(user.email);
         if (entraStatus && entraStatus.blocked) {
           console.log(`Real-time block detected for ${user.email} in Entra`);
@@ -82,6 +83,28 @@ const authenticateToken = async (req, res, next) => {
             message: 'Account blocked in Entra ID',
             redirect: true
           });
+        }
+
+        // Check 2: Does user still have app access (security group membership)?
+        const samlAppClientId = process.env.SAML_APP_CLIENT_ID;
+        if (samlAppClientId) {
+          const appAccess = await checkUserAppAccess(user.email, samlAppClientId);
+          if (appAccess && !appAccess.hasAccess) {
+            console.log(`User ${user.email} removed from security group, blocking access`);
+
+            // Blacklist current token
+            blacklistToken(token);
+
+            // Update local user status
+            await pool.query('UPDATE users SET status = $1 WHERE id = $2', ['blocked', user.id]);
+
+            return res.status(403).json({
+              message: 'Access revoked: User removed from security group',
+              redirect: true,
+              forceReauth: true,
+              reason: 'security_group'
+            });
+          }
         }
       } catch (graphError) {
         // Don't fail the request if Graph API check fails

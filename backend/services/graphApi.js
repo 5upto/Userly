@@ -114,7 +114,132 @@ async function checkUserStatusInEntra(email) {
   });
 }
 
-// Poll all SAML users and invalidate sessions of blocked users
+// Check if user still has access to the application via security group
+async function checkUserAppAccess(email, appClientId) {
+  const token = await getGraphAccessToken();
+  if (!token) return null;
+
+  // First, get the user ID
+  const userId = await getUserIdByEmail(email, token);
+  if (!userId) return { hasAccess: false, reason: 'User not found' };
+
+  // Get the service principal for this app
+  const servicePrincipalId = await getServicePrincipalId(appClientId, token);
+  if (!servicePrincipalId) return { hasAccess: true }; // Can't verify, assume access
+
+  // Check if user has app role assignment for this app
+  const hasAppAssignment = await checkAppRoleAssignment(userId, servicePrincipalId, token);
+
+  return {
+    hasAccess: hasAppAssignment,
+    reason: hasAppAssignment ? null : 'User removed from security group'
+  };
+}
+
+async function getUserIdByEmail(email, accessToken) {
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'graph.microsoft.com',
+      path: `/v1.0/users/${encodeURIComponent(email)}?$select=id`,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/json'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          if (res.statusCode === 200) {
+            const user = JSON.parse(data);
+            resolve(user.id);
+          } else {
+            resolve(null);
+          }
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    });
+
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
+async function getServicePrincipalId(appId, accessToken) {
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'graph.microsoft.com',
+      path: `/v1.0/servicePrincipals?$filter=appId eq '${appId}'&$select=id`,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/json'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          if (res.statusCode === 200) {
+            const response = JSON.parse(data);
+            resolve(response.value?.[0]?.id || null);
+          } else {
+            resolve(null);
+          }
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    });
+
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
+async function checkAppRoleAssignment(userId, servicePrincipalId, accessToken) {
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'graph.microsoft.com',
+      path: `/v1.0/users/${userId}/appRoleAssignments?$filter=resourceId eq ${servicePrincipalId}`,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/json'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          if (res.statusCode === 200) {
+            const response = JSON.parse(data);
+            // If user has any app role assignments for this app, they have access
+            resolve(response.value && response.value.length > 0);
+          } else {
+            resolve(true); // On error, assume access to avoid lockouts
+          }
+        } catch (e) {
+          resolve(true);
+        }
+      });
+    });
+
+    req.on('error', () => resolve(true));
+    req.end();
+  });
+}
+
+// Poll all SAML users and invalidate sessions of blocked/revoked users
 async function pollUserStatus() {
   try {
     // Get all active SAML users from our database
@@ -123,6 +248,7 @@ async function pollUserStatus() {
        FROM users u
        JOIN user_sessions us ON u.id = us.user_id
        WHERE us.auth_type = 'saml'
+       AND us.is_active = true
        AND us.created_at > NOW() - INTERVAL '24 hours'`
     );
 
@@ -130,40 +256,67 @@ async function pollUserStatus() {
 
     console.log(`Polling ${activeUsers.length} active SAML users against Entra...`);
 
+    // Get SAML app client ID from env
+    const samlAppClientId = process.env.SAML_APP_CLIENT_ID;
+
     for (const user of activeUsers) {
+      // Check 1: Is user blocked/disabled in Entra?
       const entraStatus = await checkUserStatusInEntra(user.email);
 
       if (entraStatus && entraStatus.blocked) {
         console.log(`User ${user.email} is BLOCKED in Entra, invalidating session`);
+        await invalidateUserSessions(user.id, 'User blocked in Entra ID');
+        continue;
+      }
 
-        // Get user's active tokens
-        const { rows: sessions } = await pool.query(
-          `SELECT token FROM user_sessions
-           WHERE user_id = $1 AND auth_type = 'saml' AND is_active = true`,
-          [user.id]
-        );
+      // Check 2: Does user still have app access (security group membership)?
+      if (samlAppClientId) {
+        const appAccess = await checkUserAppAccess(user.email, samlAppClientId);
 
-        // Blacklist all tokens
-        for (const session of sessions) {
-          blacklistToken(session.token);
+        if (appAccess && !appAccess.hasAccess) {
+          console.log(`User ${user.email} removed from security group, invalidating session`);
+          await invalidateUserSessions(user.id, appAccess.reason || 'User removed from security group');
+          continue;
         }
-
-        // Mark sessions as inactive in DB
-        await pool.query(
-          `UPDATE user_sessions SET is_active = false, invalidated_at = NOW()
-           WHERE user_id = $1 AND auth_type = 'saml'`,
-          [user.id]
-        );
-
-        // Also update local user status
-        await pool.query(
-          `UPDATE users SET status = 'blocked' WHERE id = $1`,
-          [user.id]
-        );
       }
     }
   } catch (error) {
     console.error('Error polling user status:', error);
+  }
+}
+
+// Invalidate all sessions for a user
+async function invalidateUserSessions(userId, reason) {
+  try {
+    // Get user's active tokens
+    const { rows: sessions } = await pool.query(
+      `SELECT token FROM user_sessions
+       WHERE user_id = $1 AND auth_type = 'saml' AND is_active = true`,
+      [userId]
+    );
+
+    // Blacklist all tokens
+    for (const session of sessions) {
+      blacklistToken(session.token);
+    }
+
+    // Mark sessions as inactive in DB
+    await pool.query(
+      `UPDATE user_sessions SET is_active = false, invalidated_at = NOW(),
+       invalidated_reason = $2
+       WHERE user_id = $1 AND auth_type = 'saml'`,
+      [userId, reason]
+    );
+
+    // Also update local user status
+    await pool.query(
+      `UPDATE users SET status = 'blocked' WHERE id = $1`,
+      [userId]
+    );
+
+    console.log(`Invalidated ${sessions.length} sessions for user ${userId}: ${reason}`);
+  } catch (error) {
+    console.error('Error invalidating user sessions:', error);
   }
 }
 
@@ -186,5 +339,7 @@ function startUserStatusPolling() {
 module.exports = {
   startUserStatusPolling,
   checkUserStatusInEntra,
-  pollUserStatus
+  checkUserAppAccess,
+  pollUserStatus,
+  invalidateUserSessions
 };

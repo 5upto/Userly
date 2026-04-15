@@ -16,9 +16,14 @@ const Login = () => {
   const [searchParams] = useSearchParams();
 
   useEffect(() => {
-    // Check if user was redirected due to being blocked in Entra
+    // Check if user was redirected due to being blocked/revoked in Entra
     if (searchParams.get('blocked') === 'true') {
-      setBlockedMessage('Your account has been blocked in Entra ID. Please contact your administrator.');
+      const reason = searchParams.get('reason');
+      if (reason === 'security_group') {
+        setBlockedMessage('Your access has been revoked. You were removed from the security group that grants access to this application. Please contact your administrator.');
+      } else {
+        setBlockedMessage('Your account has been blocked in Entra ID. Please contact your administrator.');
+      }
     }
   }, [searchParams]);
 

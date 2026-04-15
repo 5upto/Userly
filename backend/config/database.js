@@ -59,11 +59,12 @@ const initDatabase = async () => {
       CREATE TABLE IF NOT EXISTS user_sessions (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        token TEXT NOT NULL,
+        token TEXT NOT NULL UNIQUE,
         auth_type TEXT DEFAULT 'saml',
         is_active BOOLEAN DEFAULT true,
         created_at TIMESTAMPTZ DEFAULT NOW(),
-        invalidated_at TIMESTAMPTZ NULL
+        invalidated_at TIMESTAMPTZ NULL,
+        invalidated_reason TEXT NULL
       )
     `);
 
@@ -73,6 +74,12 @@ const initDatabase = async () => {
 
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token)
+    `);
+
+    // Migration: Add invalidated_reason column if not exists
+    await client.query(`
+      ALTER TABLE user_sessions
+      ADD COLUMN IF NOT EXISTS invalidated_reason TEXT NULL
     `);
 
     // Set supto.shawon2002@gmail.com as Super Admin
