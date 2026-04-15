@@ -208,7 +208,7 @@ async function checkAppRoleAssignment(userId, servicePrincipalId, accessToken) {
   return new Promise((resolve) => {
     const options = {
       hostname: 'graph.microsoft.com',
-      path: `/v1.0/users/${userId}/appRoleAssignments?$filter=resourceId eq ${servicePrincipalId}`,
+      path: `/v1.0/users/${encodeURIComponent(userId)}/appRoleAssignments?$filter=resourceId%20eq%20${encodeURIComponent(servicePrincipalId)}`,
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
