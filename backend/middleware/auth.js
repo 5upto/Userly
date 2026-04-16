@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
-const { checkUserStatusInEntra, checkUserGroupMembership, getRecentGroupRemovals } = require('../services/graphApi');
+const { checkUserStatusInEntra, checkUserGroupMembership, checkUserAppAccess, getRecentGroupRemovals } = require('../services/graphApi');
 
 // Token blacklist for IdP-initiated SLO (in production, use Redis/DB)
 const tokenBlacklist = new Set();

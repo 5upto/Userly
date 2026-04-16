@@ -82,6 +82,12 @@ const initDatabase = async () => {
       ADD COLUMN IF NOT EXISTS invalidated_reason TEXT NULL
     `);
 
+    // Migration: Add unique constraint on token column for ON CONFLICT
+    await client.query(`
+      ALTER TABLE user_sessions
+      ADD CONSTRAINT IF NOT EXISTS user_sessions_token_unique UNIQUE (token)
+    `);
+
     // Set supto.shawon2002@gmail.com as Super Admin
     await client.query(`
       UPDATE users 
