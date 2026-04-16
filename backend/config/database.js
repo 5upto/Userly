@@ -83,10 +83,20 @@ const initDatabase = async () => {
     `);
 
     // Migration: Add unique constraint on token column for ON CONFLICT
-    await client.query(`
-      ALTER TABLE user_sessions
-      ADD CONSTRAINT IF NOT EXISTS user_sessions_token_unique UNIQUE (token)
-    `);
+    try {
+      await client.query(`
+        ALTER TABLE user_sessions
+        ADD CONSTRAINT user_sessions_token_unique UNIQUE (token)
+      `);
+      console.log('Added unique constraint on user_sessions.token');
+    } catch (constraintError) {
+      // Constraint already exists or table doesn't exist yet, ignore
+      if (constraintError.code === '42P07' || constraintError.message?.includes('already exists')) {
+        console.log('Unique constraint on token already exists');
+      } else {
+        console.log('Note: Could not add unique constraint (may already exist):', constraintError.message);
+      }
+    }
 
     // Set supto.shawon2002@gmail.com as Super Admin
     await client.query(`
