@@ -114,6 +114,61 @@ async function checkUserStatusInEntra(email) {
   });
 }
 
+// Check if user is currently a member of the security group (real-time)
+async function checkUserGroupMembership(email, securityGroupId) {
+  const token = await getGraphAccessToken();
+  if (!token) return null;
+
+  // First get user ID
+  const userId = await getUserIdByEmail(email, token);
+  if (!userId) return { isMember: false, reason: 'User not found' };
+
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'graph.microsoft.com',
+      path: `/v1.0/groups/${encodeURIComponent(securityGroupId)}/members?$select=id&$top=500`,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          if (res.statusCode === 200) {
+            const response = JSON.parse(data);
+            const members = response.value || [];
+            const isMember = members.some(m => m.id === userId);
+
+            resolve({
+              isMember: isMember,
+              reason: isMember ? null : 'User not in security group'
+            });
+          } else if (res.statusCode === 404) {
+            resolve({ isMember: false, reason: 'Group not found' });
+          } else {
+            console.error(`Group membership check error: ${res.statusCode}`, data);
+            resolve({ isMember: true }); // Assume access on error
+          }
+        } catch (e) {
+          console.error('Error parsing group membership:', e);
+          resolve({ isMember: true }); // Assume access on error
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      console.error('Group membership request error:', err);
+      resolve({ isMember: true }); // Assume access on error
+    });
+    req.end();
+  });
+}
+
 // Check if user was recently removed from the security group via audit logs
 async function checkAuditLogsForGroupRemoval(email, securityGroupId) {
   const token = await getGraphAccessToken();
@@ -528,6 +583,7 @@ function startUserStatusPolling() {
 module.exports = {
   startUserStatusPolling,
   checkUserStatusInEntra,
+  checkUserGroupMembership,
   checkUserAppAccess,
   checkAuditLogsForGroupRemoval,
   getRecentGroupRemovals,
