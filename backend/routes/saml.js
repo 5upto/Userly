@@ -131,7 +131,9 @@ const getSamlStrategy = (config) => {
           // Update existing user's last login time
           user = existingUsers[0];
           if (user.status === 'blocked') {
-            return done(new Error('Account is blocked'), null);
+            const err = new Error('Account is blocked');
+            err.name = 'AccountBlockedError';
+            return done(err, null);
           }
           await pool.query(
             'UPDATE users SET last_login_time = NOW() WHERE id = $1',
@@ -406,6 +408,10 @@ router.post('/acs', (req, res, next) => {
         console.error('Passport authentication error:', err);
         console.error('Error type:', err.name);
         console.error('Error message:', err.message);
+        // Handle account blocked error specially
+        if (err.name === 'AccountBlockedError') {
+          return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=account_locked');
+        }
         const errorMsg = encodeURIComponent(err.message || 'Unknown error');
         return res.redirect(`https://userly-pro.vercel.app/login?error=passport_error&details=${errorMsg}`);
       }
@@ -458,7 +464,7 @@ async function handleSamlUser(profile, res) {
       console.log('Existing user found:', user.id, 'status:', user.status);
       if (user.status === 'blocked') {
         console.error('Account is blocked');
-        return res.redirect('https://userly-pro.vercel.app/login?error=account_blocked');
+        return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=account_locked');
       }
       await pool.query(
         'UPDATE users SET last_login_time = NOW() WHERE id = $1',
