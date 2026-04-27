@@ -132,7 +132,7 @@ const Login = () => {
             <div className="mt-6">
               <button
                 type="button"
-                onClick={() => window.location.href = 'https://account.activedirectory.windowsazure.com/applications/signin/583d7484-5aa3-46d3-840b-ef314a469bcc?tenantId=838db0c1-3571-4046-9187-f7ed28f52565'}
+                onClick={() => window.location.href = 'https://account.activedirectory.windowsazure.com/applications/signin/843718f4-582a-4b95-9f6a-c47527647ba3?tenantld=0d2c1116-d7c2-4380-b446-78e71d8f2465'}
                 className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
               >
                 <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
