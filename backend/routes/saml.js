@@ -186,18 +186,27 @@ router.get('/providers', (req, res) => {
 router.get('/status', async (req, res) => {
   // Also query DB directly for comparison
   let dbConfigs = [];
+  let schemaInfo = [];
   try {
-    const { rows } = await pool.query('SELECT id, saml_name, idp_sso_url, idp_slo_url FROM saml_configs');
+    const { rows } = await pool.query('SELECT id, saml_name, idp_sso_url, idp_slo_url, enabled, tenant_id, client_id, graph_api_enabled FROM saml_configs');
     dbConfigs = rows;
+    // Get column info
+    const { rows: cols } = await pool.query(`
+      SELECT column_name, data_type
+      FROM information_schema.columns
+      WHERE table_name = 'saml_configs'
+    `);
+    schemaInfo = cols;
   } catch (e) {
     dbConfigs = [{ error: e.message }];
   }
 
   res.json({
     configsCount: samlConfigs.length,
-    memoryConfigs: samlConfigs.map(c => ({ id: c.id, name: c.saml_name, sloUrl: c.idp_slo_url })),
+    memoryConfigs: samlConfigs.map(c => ({ id: c.id, name: c.saml_name, enabled: c.enabled, sloUrl: c.idp_slo_url })),
     dbConfigs: dbConfigs,
-    strategiesRegistered: Object.keys(strategies).length
+    schemaColumns: schemaInfo,
+    strategiesRegistered: Object.keys(passport._strategies || {}).filter(k => k.startsWith('saml-')).length
   });
 });
 
@@ -333,6 +342,20 @@ router.patch('/config/:id/toggle', authenticateToken, requireAdmin, async (req, 
     const { enabled } = req.body;
 
     console.log(`Toggling SAML config ${id} to enabled: ${enabled}`);
+
+    // Check if enabled column exists first
+    try {
+      await pool.query(`SELECT enabled FROM saml_configs LIMIT 1`);
+    } catch (colError) {
+      console.error('enabled column may not exist:', colError.message);
+      // Try to add the column
+      try {
+        await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true`);
+        console.log('Added enabled column to saml_configs');
+      } catch (addError) {
+        console.error('Failed to add enabled column:', addError.message);
+      }
+    }
 
     // Update in database
     const { rows } = await pool.query(

@@ -227,21 +227,22 @@ const SamlConfig = () => {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {/* Toggle Switch - treat undefined as enabled (true) */}
-                        <button
+                        {/* Toggle Switch - Better styled */}
+                        <div
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
                             handleToggle(cfg.id, cfg.enabled !== false);
                           }}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${cfg.enabled !== false ? 'bg-indigo-600' : 'bg-gray-200'}`}
+                          className={`relative inline-flex h-7 w-12 items-center rounded-full cursor-pointer transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${cfg.enabled !== false ? 'bg-green-500 shadow-green-200' : 'bg-gray-300'}`}
                           title={cfg.enabled !== false ? 'Click to disable' : 'Click to enable'}
-                          type="button"
+                          role="switch"
+                          aria-checked={cfg.enabled !== false}
                         >
                           <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${cfg.enabled !== false ? 'translate-x-6' : 'translate-x-1'}`}
+                            className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition-transform duration-200 ease-in-out ${cfg.enabled !== false ? 'translate-x-6' : 'translate-x-1'}`}
                           />
-                        </button>
+                        </div>
                         <button
                           onClick={() => downloadMetadata(cfg.id)}
                           className="inline-flex items-center px-3 py-1 border border-gray-300 text-sm font-medium rounded text-gray-700 bg-white hover:bg-gray-50"
