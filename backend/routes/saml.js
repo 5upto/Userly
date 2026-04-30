@@ -348,26 +348,40 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
 // Toggle SAML configuration enabled status
 router.patch('/config/:id/toggle', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const requestedId = req.params.id;
+    const id = parseInt(requestedId);
     const { enabled } = req.body;
 
-    console.log(`Toggling SAML config ${id} to enabled: ${enabled}`);
+    console.log(`Toggling SAML config ${requestedId} (parsed: ${id}) to enabled: ${enabled}`);
 
     // Ensure column exists
     await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true`);
 
-    // Update in database
-    const { rows } = await pool.query(
-      `UPDATE saml_configs SET enabled = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
-      [enabled, id]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'Configuration not found' });
+    // Update in database - try both string and numeric ID
+    let rows = [];
+    try {
+      const result = await pool.query(
+        `UPDATE saml_configs SET enabled = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+        [enabled, id]
+      );
+      rows = result.rows;
+    } catch (dbErr) {
+      // If numeric ID fails, try as string (for old Date.now() IDs)
+      const result = await pool.query(
+        `UPDATE saml_configs SET enabled = $1, updated_at = NOW() WHERE id::text = $2 RETURNING *`,
+        [enabled, requestedId]
+      );
+      rows = result.rows;
     }
 
-    // Update in memory
-    const configIndex = samlConfigs.findIndex(c => parseInt(c.id) === id);
+    if (rows.length === 0) {
+      console.log(`Config ${requestedId} not found in DB, updating in-memory only`);
+    }
+
+    // Update in memory - handle both string and numeric IDs
+    const configIndex = samlConfigs.findIndex(c =>
+      c.id == requestedId || parseInt(c.id) === id
+    );
     if (configIndex !== -1) {
       samlConfigs[configIndex].enabled = enabled;
 
@@ -388,7 +402,10 @@ router.patch('/config/:id/toggle', authenticateToken, requireAdmin, async (req, 
       }
     }
 
-    res.json({ message: `Configuration ${enabled ? 'enabled' : 'disabled'}`, config: rows[0] });
+    res.json({
+      message: `Configuration ${enabled ? 'enabled' : 'disabled'}`,
+      config: rows[0] || samlConfigs[configIndex]
+    });
   } catch (error) {
     console.error('Error toggling SAML config:', error.message);
     res.status(500).json({ message: 'Failed to toggle configuration: ' + error.message });
@@ -425,12 +442,15 @@ router.delete('/config/:id', authenticateToken, requireAdmin, async (req, res) =
 
 // Generate SAML metadata for service provider
 router.get('/metadata/:id', (req, res) => {
-  const id = parseInt(req.params.id);
-  const config = samlConfigs.find(c => parseInt(c.id) === id);
+  const requestedId = req.params.id;
+  // Handle both old Date.now() string IDs and new SERIAL numeric IDs
+  const config = samlConfigs.find(c =>
+    c.id == requestedId || parseInt(c.id) == parseInt(requestedId)
+  );
 
   if (!config) {
-    console.error('Metadata download: Config not found for id:', id);
-    console.error('Available configs:', samlConfigs.map(c => ({ id: c.id, name: c.saml_name })));
+    console.error('Metadata download: Config not found for id:', requestedId);
+    console.error('Available configs:', samlConfigs.map(c => ({ id: c.id, type: typeof c.id, name: c.saml_name })));
     return res.status(404).json({ message: 'Configuration not found' });
   }
 
