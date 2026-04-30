@@ -1,5 +1,5 @@
 const https = require('https');
-const { blacklistToken } = require('../middleware/auth');
+const { blacklistToken } = require('./tokenBlacklist');
 const { pool } = require('../config/database');
 
 // Microsoft Graph API configuration (legacy single-tenant support)
