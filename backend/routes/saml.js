@@ -76,6 +76,7 @@ const loadSamlConfigsFromDb = async () => {
         client_secret: row.client_secret,
         graph_api_enabled: row.graph_api_enabled === true,
         saml_app_id: row.saml_app_id,
+        security_group_id: row.security_group_id,
         created_at: row.created_at
       }));
 
@@ -181,7 +182,8 @@ router.get('/providers', (req, res) => {
       issuer_url: c.issuer_url,
       idp_slo_url: c.idp_slo_url,
       tenant_id: c.tenant_id,
-      saml_app_id: c.saml_app_id
+      saml_app_id: c.saml_app_id,
+      security_group_id: c.security_group_id
     }));
   res.json(providers);
 });
@@ -234,7 +236,7 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
     console.log('Request body keys:', Object.keys(req.body));
     console.log('Has file:', !!req.file);
     const { samlName, allowedDomains, issuerUrl, idpSsoUrl, idpSloUrl, idpCertificate,
-            enabled, tenantId, clientId, clientSecret, graphApiEnabled, samlAppId } = req.body;
+            enabled, tenantId, clientId, clientSecret, graphApiEnabled, samlAppId, securityGroupId } = req.body;
     console.log('Config name:', samlName, 'Enabled:', enabled);
 
     // Parse metadata file if provided
@@ -286,6 +288,7 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
       client_secret: clientSecret || null,
       graph_api_enabled: graphApiEnabled === 'true' || graphApiEnabled === true,
       saml_app_id: samlAppId || null,
+      security_group_id: securityGroupId || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -300,17 +303,18 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
       await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS client_secret TEXT`);
       await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS graph_api_enabled BOOLEAN DEFAULT false`);
       await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS saml_app_id VARCHAR(255)`);
+      await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS security_group_id VARCHAR(255)`);
 
       // Insert new config - use serial id from DB, not the Date.now()
       const { rows } = await pool.query(
         `INSERT INTO saml_configs (saml_name, allowed_domains, issuer_url, idp_sso_url, idp_slo_url, idp_certificate,
-          enabled, tenant_id, client_id, client_secret, graph_api_enabled, saml_app_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          enabled, tenant_id, client_id, client_secret, graph_api_enabled, saml_app_id, security_group_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING *`,
         [config.saml_name, config.allowed_domains, config.issuer_url,
          config.idp_sso_url, config.idp_slo_url, config.idp_certificate,
          config.enabled, config.tenant_id, config.client_id, config.client_secret,
-         config.graph_api_enabled, config.saml_app_id]
+         config.graph_api_enabled, config.saml_app_id, config.security_group_id]
       );
       savedConfig = rows[0];
       // Update config with DB id
@@ -611,7 +615,8 @@ async function handleSamlUser(profile, res, samlConfig) {
       tenantId: samlConfig.tenant_id,
       clientId: samlConfig.client_id,
       clientSecret: samlConfig.client_secret,
-      graphApiEnabled: samlConfig.graph_api_enabled
+      graphApiEnabled: samlConfig.graph_api_enabled,
+      securityGroupId: samlConfig.security_group_id
     } : null;
 
     // Generate short-lived JWT token (15 min) for SAML users

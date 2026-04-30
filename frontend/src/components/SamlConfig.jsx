@@ -19,7 +19,8 @@ const SamlConfig = () => {
     clientId: '',
     clientSecret: '',
     graphApiEnabled: false,
-    samlAppId: ''
+    samlAppId: '',
+    securityGroupId: ''
   });
   const [existingConfigs, setExistingConfigs] = useState([]);
   const [showNewConfig, setShowNewConfig] = useState(false);
@@ -68,6 +69,7 @@ const SamlConfig = () => {
       formData.append('clientSecret', config.clientSecret);
       formData.append('graphApiEnabled', config.graphApiEnabled);
       formData.append('samlAppId', config.samlAppId);
+      formData.append('securityGroupId', config.securityGroupId);
       if (config.metadataFile) {
         formData.append('metadataFile', config.metadataFile);
       }
@@ -96,7 +98,8 @@ const SamlConfig = () => {
         clientId: '',
         clientSecret: '',
         graphApiEnabled: false,
-        samlAppId: ''
+        samlAppId: '',
+        securityGroupId: ''
       });
       fetchConfigs();
     } catch (error) {
@@ -489,6 +492,30 @@ const SamlConfig = () => {
                     />
                     <p className="mt-1 text-xs text-gray-500">
                       Found in Azure AD → Enterprise Applications → Application ID
+                    </p>
+                  </div>
+                </div>
+
+                {/* Security Group Configuration */}
+                <div className="border-t border-gray-200 pt-6">
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Security Group Check (Optional)</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Azure AD Security Group ID to verify user membership via Graph API. Users not in this group will be blocked.
+                  </p>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Security Group ID
+                    </label>
+                    <input
+                      type="text"
+                      name="securityGroupId"
+                      value={config.securityGroupId}
+                      onChange={handleInputChange}
+                      placeholder="e.g., a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Found in Azure AD → Groups → Object ID
                     </p>
                   </div>
                 </div>

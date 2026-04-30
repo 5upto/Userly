@@ -91,6 +91,11 @@ const initDatabase = async () => {
       ALTER TABLE saml_configs 
       ADD COLUMN IF NOT EXISTS saml_app_id VARCHAR(255)
     `);
+    // Security Group ID for checking user membership via Graph API
+    await client.query(`
+      ALTER TABLE saml_configs 
+      ADD COLUMN IF NOT EXISTS security_group_id VARCHAR(255)
+    `);
 
     // Create user_sessions table for tracking active SAML sessions (for Graph API polling)
     await client.query(`
