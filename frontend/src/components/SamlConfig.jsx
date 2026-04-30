@@ -227,11 +227,16 @@ const SamlConfig = () => {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {/* Toggle Switch */}
+                        {/* Toggle Switch - treat undefined as enabled (true) */}
                         <button
-                          onClick={() => handleToggle(cfg.id, cfg.enabled)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleToggle(cfg.id, cfg.enabled !== false);
+                          }}
                           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${cfg.enabled !== false ? 'bg-indigo-600' : 'bg-gray-200'}`}
                           title={cfg.enabled !== false ? 'Click to disable' : 'Click to enable'}
+                          type="button"
                         >
                           <span
                             className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${cfg.enabled !== false ? 'translate-x-6' : 'translate-x-1'}`}
