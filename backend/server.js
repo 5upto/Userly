@@ -24,7 +24,7 @@ app.use(limiter);
 // Allow CORS for SAML routes (IdP posts from its own domain) - must be before global CORS
 app.use('/api/saml', cors({
   origin: '*',
-  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
