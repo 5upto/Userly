@@ -157,11 +157,9 @@ const Login = () => {
                   type="button"
                   onClick={() => {
                     const provider = samlProviders[0];
-                    // Use SAML App ID (Azure AD Enterprise Application ID) for MyApps link
-                    const tenantId = provider.tenant_id || '0d2c1116-d7c2-4380-b446-78e71d8f2465';
-                    const samlAppId = provider.saml_app_id || '843718f4-582a-4b95-9f6a-c47527647ba3';
-                    // Azure AD MyApps link uses the SAML App ID (Enterprise Application ID)
-                    window.location.href = `https://account.activedirectory.windowsazure.com/applications/signin/${samlAppId}?tenantId=${tenantId}`;
+                    // Use our SAML login endpoint which handles the proper SAML redirect
+                    // This works better for multi-tenant scenarios than Azure AD MyApps direct link
+                    window.location.href = `${import.meta.env.VITE_API_URL || 'https://userly-341i.onrender.com'}/api/saml/login/${provider.id}`;
                   }}
                   className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
                 >

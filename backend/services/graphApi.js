@@ -143,8 +143,10 @@ async function getGraphAccessToken() {
 }
 
 // Check user status in Entra via Graph API
-async function checkUserStatusInEntra(email) {
-  const token = await getGraphAccessToken();
+async function checkUserStatusInEntra(email, token) {
+  if (!token) {
+    token = await getGraphAccessToken();
+  }
   if (!token) return null;
 
   return new Promise((resolve, reject) => {
@@ -164,7 +166,10 @@ async function checkUserStatusInEntra(email) {
       res.on('end', () => {
         try {
           if (res.statusCode === 404) {
-            resolve({ exists: false, blocked: true });
+            // User not found in this tenant - could be wrong tenant credentials
+            // Don't auto-block, just return null to skip this check
+            console.log(`User ${email} not found in this Entra tenant (wrong tenant credentials?)`);
+            resolve({ exists: false, blocked: false, wrongTenant: true });
           } else if (res.statusCode === 200) {
             const user = JSON.parse(data);
             resolve({
@@ -190,8 +195,10 @@ async function checkUserStatusInEntra(email) {
 }
 
 // Check if user is currently a member of the security group (real-time)
-async function checkUserGroupMembership(email, securityGroupId) {
-  const token = await getGraphAccessToken();
+async function checkUserGroupMembership(email, securityGroupId, token) {
+  if (!token) {
+    token = await getGraphAccessToken();
+  }
   if (!token) return null;
 
   // First get user ID
@@ -316,31 +323,17 @@ async function checkAuditLogsForGroupRemoval(email, securityGroupId) {
 }
 
 // Check if user still has access to the application via security group
-async function checkUserAppAccess(email, appClientId) {
-  const token = await getGraphAccessToken();
+async function checkUserAppAccess(email, securityGroupId, token) {
+  if (!token) {
+    token = await getGraphAccessToken();
+  }
   if (!token) return null;
 
-  // First, get the user ID
-  const userId = await getUserIdByEmail(email, token);
-  if (!userId) return { hasAccess: false, reason: 'User not found' };
+  // Check if user is member of the security group
+  const membership = await checkUserGroupMembership(email, securityGroupId, token);
 
-  // Check 1: Direct app role assignment
-  const servicePrincipalId = await getServicePrincipalId(appClientId, token);
-  if (servicePrincipalId) {
-    const hasAppAssignment = await checkAppRoleAssignment(userId, servicePrincipalId, token);
-    if (!hasAppAssignment) {
-      // Check 2: Was user recently removed from security group? (via audit logs)
-      const securityGroupId = process.env.SAML_SECURITY_GROUP_ID;
-      if (securityGroupId) {
-        const auditCheck = await checkAuditLogsForGroupRemoval(email, securityGroupId);
-        if (auditCheck?.wasRemoved) {
-          console.log(`Audit log: User ${email} was removed from security group ${securityGroupId}`);
-          return { hasAccess: false, reason: 'User removed from security group' };
-        }
-      }
-
-      return { hasAccess: false, reason: 'User removed from security group' };
-    }
+  if (!membership || !membership.isMember) {
+    return { hasAccess: false, reason: membership?.reason || 'User not in security group' };
   }
 
   return { hasAccess: true };
@@ -449,6 +442,38 @@ async function checkAppRoleAssignment(userId, servicePrincipalId, accessToken) {
   });
 }
 
+// Get Graph token for user based on their email domain's SAML config
+async function getGraphTokenForUser(email) {
+  try {
+    const domain = email.split('@')[1]?.toLowerCase();
+    if (!domain) return null;
+
+    // Find SAML config that matches this user's domain
+    const { rows: configs } = await pool.query(
+      `SELECT tenant_id, client_id, client_secret, graph_api_enabled, security_group_id
+       FROM saml_configs
+       WHERE graph_api_enabled = true
+       AND tenant_id IS NOT NULL
+       AND client_id IS NOT NULL
+       AND client_secret IS NOT NULL
+       AND (allowed_domains ILIKE $1 OR allowed_domains ILIKE $2)`,
+      [`%${domain}%`, `%${email.toLowerCase()}%`]
+    );
+
+    if (configs.length === 0) {
+      console.log(`No SAML config with Graph API found for domain: ${domain}`);
+      return { token: await getGraphAccessToken(), config: null }; // Fall back to global
+    }
+
+    const config = configs[0];
+    const token = await getTenantGraphToken(config.tenant_id, config.client_id, config.client_secret);
+    return { token, config };
+  } catch (error) {
+    console.error('Error getting Graph token for user:', error);
+    return { token: await getGraphAccessToken(), config: null };
+  }
+}
+
 // Poll all SAML users and invalidate sessions of blocked/revoked users
 async function pollUserStatus() {
   try {
@@ -466,12 +491,17 @@ async function pollUserStatus() {
 
     console.log(`Polling ${activeUsers.length} active SAML users against Entra...`);
 
-    // Get SAML app client ID from env
-    const samlAppClientId = process.env.SAML_APP_CLIENT_ID;
-
     for (const user of activeUsers) {
+      // Get tenant-specific credentials for this user
+      const { token, config } = await getGraphTokenForUser(user.email);
+
+      if (!token) {
+        console.log(`No Graph API token available for ${user.email}, skipping`);
+        continue;
+      }
+
       // Check 1: Is user blocked/disabled in Entra?
-      const entraStatus = await checkUserStatusInEntra(user.email);
+      const entraStatus = await checkUserStatusInEntra(user.email, token);
 
       if (entraStatus && entraStatus.blocked) {
         console.log(`User ${user.email} is BLOCKED in Entra, invalidating session`);
@@ -479,9 +509,15 @@ async function pollUserStatus() {
         continue;
       }
 
+      // If user not found in this tenant, skip checks (wrong tenant credentials)
+      if (entraStatus && entraStatus.wrongTenant) {
+        console.log(`User ${user.email} not found in tenant ${config?.tenant_id || 'global'}, skipping checks`);
+        continue;
+      }
+
       // Check 2: Does user still have app access (security group membership)?
-      if (samlAppClientId) {
-        const appAccess = await checkUserAppAccess(user.email, samlAppClientId);
+      if (config?.security_group_id) {
+        const appAccess = await checkUserAppAccess(user.email, config.security_group_id, token);
 
         if (appAccess && !appAccess.hasAccess) {
           console.log(`User ${user.email} removed from security group, invalidating session`);
