@@ -195,7 +195,14 @@ const Login = () => {
                         key={provider.id}
                         type="button"
                         onClick={() => {
-                          window.location.href = `${import.meta.env.VITE_API_URL || 'https://userly-341i.onrender.com'}/api/saml/login/${provider.id}`;
+                          // Use Azure AD MyApps direct link if saml_app_id is configured
+                          if (provider.saml_app_id && provider.tenant_id) {
+                            const azureAdUrl = `https://account.activedirectory.windowsazure.com/applications/signin/${provider.saml_app_id}?tenantId=${provider.tenant_id}`;
+                            window.location.href = azureAdUrl;
+                          } else {
+                            // Fallback to backend SAML login endpoint
+                            window.location.href = `${import.meta.env.VITE_API_URL || 'https://userly-341i.onrender.com'}/api/saml/login/${provider.id}`;
+                          }
                         }}
                         className="w-full flex items-center justify-between p-4 border border-gray-300 rounded-lg hover:border-indigo-500 hover:bg-indigo-50 transition-colors"
                       >
