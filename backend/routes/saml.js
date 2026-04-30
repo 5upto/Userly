@@ -286,33 +286,32 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
     };
 
     // Save to database for persistence
+    let savedConfig = null;
     try {
+      // First ensure columns exist
+      await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true`);
+      await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(255)`);
+      await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS client_id VARCHAR(255)`);
+      await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS client_secret TEXT`);
+      await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS graph_api_enabled BOOLEAN DEFAULT false`);
+
+      // Insert new config - use serial id from DB, not the Date.now()
       const { rows } = await pool.query(
-        `INSERT INTO saml_configs (id, saml_name, allowed_domains, issuer_url, idp_sso_url, idp_slo_url, idp_certificate,
-          enabled, tenant_id, client_id, client_secret, graph_api_enabled, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-         ON CONFLICT (id) DO UPDATE SET
-           saml_name = EXCLUDED.saml_name,
-           allowed_domains = EXCLUDED.allowed_domains,
-           issuer_url = EXCLUDED.issuer_url,
-           idp_sso_url = EXCLUDED.idp_sso_url,
-           idp_slo_url = EXCLUDED.idp_slo_url,
-           idp_certificate = EXCLUDED.idp_certificate,
-           enabled = EXCLUDED.enabled,
-           tenant_id = EXCLUDED.tenant_id,
-           client_id = EXCLUDED.client_id,
-           client_secret = EXCLUDED.client_secret,
-           graph_api_enabled = EXCLUDED.graph_api_enabled,
-           updated_at = NOW()
+        `INSERT INTO saml_configs (saml_name, allowed_domains, issuer_url, idp_sso_url, idp_slo_url, idp_certificate,
+          enabled, tenant_id, client_id, client_secret, graph_api_enabled)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING *`,
-        [config.id, config.saml_name, config.allowed_domains, config.issuer_url,
+        [config.saml_name, config.allowed_domains, config.issuer_url,
          config.idp_sso_url, config.idp_slo_url, config.idp_certificate,
          config.enabled, config.tenant_id, config.client_id, config.client_secret,
-         config.graph_api_enabled, config.created_at]
+         config.graph_api_enabled]
       );
-      console.log('SAML config saved to database:', rows[0].id, 'Enabled:', rows[0].enabled);
+      savedConfig = rows[0];
+      // Update config with DB id
+      config.id = savedConfig.id;
+      console.log('SAML config saved to database:', savedConfig.id, 'Enabled:', savedConfig.enabled);
     } catch (dbError) {
-      console.error('Failed to save SAML config to database:', dbError);
+      console.error('Failed to save SAML config to database:', dbError.message);
       // Continue with in-memory only if DB fails
     }
 
@@ -328,10 +327,11 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
       console.log(`SAML config saved but disabled: ${config.id}`);
     }
 
-    res.status(201).json(config);
+    // Return config with database values
+    res.status(201).json(savedConfig || config);
   } catch (error) {
     console.error('Error saving SAML config:', error);
-    res.status(500).json({ message: 'Failed to save SAML configuration' });
+    res.status(500).json({ message: 'Failed to save SAML configuration: ' + error.message });
   }
 });
 
@@ -343,19 +343,8 @@ router.patch('/config/:id/toggle', authenticateToken, requireAdmin, async (req, 
 
     console.log(`Toggling SAML config ${id} to enabled: ${enabled}`);
 
-    // Check if enabled column exists first
-    try {
-      await pool.query(`SELECT enabled FROM saml_configs LIMIT 1`);
-    } catch (colError) {
-      console.error('enabled column may not exist:', colError.message);
-      // Try to add the column
-      try {
-        await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true`);
-        console.log('Added enabled column to saml_configs');
-      } catch (addError) {
-        console.error('Failed to add enabled column:', addError.message);
-      }
-    }
+    // Ensure column exists
+    await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true`);
 
     // Update in database
     const { rows } = await pool.query(
@@ -391,8 +380,8 @@ router.patch('/config/:id/toggle', authenticateToken, requireAdmin, async (req, 
 
     res.json({ message: `Configuration ${enabled ? 'enabled' : 'disabled'}`, config: rows[0] });
   } catch (error) {
-    console.error('Error toggling SAML config:', error);
-    res.status(500).json({ message: 'Failed to toggle configuration' });
+    console.error('Error toggling SAML config:', error.message);
+    res.status(500).json({ message: 'Failed to toggle configuration: ' + error.message });
   }
 });
 

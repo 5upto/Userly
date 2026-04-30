@@ -28,10 +28,10 @@ const initDatabase = async () => {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)
     `);
 
-    // Create SAML configs table
+    // Create SAML configs table with SERIAL id
     await client.query(`
       CREATE TABLE IF NOT EXISTS saml_configs (
-        id BIGINT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         saml_name VARCHAR(255) NOT NULL,
         allowed_domains TEXT,
         issuer_url TEXT,
@@ -41,6 +41,17 @@ const initDatabase = async () => {
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+
+    // Migration: Change id from BIGINT to SERIAL if table exists with old schema
+    try {
+      await client.query(`ALTER TABLE saml_configs ALTER COLUMN id DROP DEFAULT`);
+      await client.query(`CREATE SEQUENCE IF NOT EXISTS saml_configs_id_seq`);
+      await client.query(`SELECT setval('saml_configs_id_seq', (SELECT COALESCE(MAX(id), 0) + 1 FROM saml_configs))`);
+      await client.query(`ALTER TABLE saml_configs ALTER COLUMN id SET DEFAULT nextval('saml_configs_id_seq')`);
+      console.log('Migrated saml_configs id to use sequence');
+    } catch (migrateError) {
+      // Ignore if already serial or other issues
+    }
 
     // Migration: Add role column if it doesn't exist (for existing tables)
     await client.query(`
