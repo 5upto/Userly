@@ -938,6 +938,10 @@ router.get('/logout/:id', async (req, res) => {
     const logoutUrl = buildLogoutUrl(config, nameID);
     console.log('Redirecting to IdP logout:', logoutUrl);
 
+    if (!logoutUrl) {
+      return res.redirect(process.env.FRONTEND_URL || 'https://userly-pro.vercel.app/login?logout=success');
+    }
+
     res.redirect(logoutUrl);
   } catch (error) {
     console.error('SAML logout error:', error);

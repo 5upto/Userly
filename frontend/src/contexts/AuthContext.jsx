@@ -119,6 +119,13 @@ export const AuthProvider = ({ children }) => {
 
       setUser(userData);
       localStorage.setItem('user', JSON.stringify(userData));
+
+      // Store samlConfigId for correct SLO
+      if (payload.samlConfigId) {
+        setSamlConfigId(payload.samlConfigId);
+        localStorage.setItem('samlConfigId', payload.samlConfigId);
+      }
+
       sessionStorage.removeItem('samlRedirected');
     } catch (e) {
       console.error('Failed to decode token:', e);
@@ -268,37 +275,42 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     const userData = localStorage.getItem('user');
     const userEmail = userData ? JSON.parse(userData).email : null;
+    const userSamlConfigId = localStorage.getItem('samlConfigId');
 
     // Clear all tokens first
     localStorage.removeItem('token');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('tokenExpiry');
     localStorage.removeItem('user');
+    localStorage.removeItem('samlConfigId');
     setUser(null);
     setToken(null);
     setRefreshToken(null);
     setTokenExpiry(null);
+    setSamlConfigId(null);
     delete api.defaults.headers.common['Authorization'];
 
-    // Check if any SAML provider has SLO configured
-    try {
-      const response = await fetch('https://userly-341i.onrender.com/api/saml/providers');
-      const providers = await response.json();
-      const sloProvider = providers.find(p => p.idp_slo_url);
+    // Check if user's SAML provider has SLO configured
+    if (userSamlConfigId) {
+      try {
+        const response = await fetch('https://userly-341i.onrender.com/api/saml/providers');
+        const providers = await response.json();
+        const userProvider = providers.find(p => p.id == userSamlConfigId && p.idp_slo_url);
 
-      if (sloProvider) {
-        // Redirect to SP-initiated SLO endpoint
-        const apiBaseUrl = 'https://userly-341i.onrender.com';
-        const sloUrl = `${apiBaseUrl}/api/saml/logout/${sloProvider.id}${userEmail ? `?nameID=${encodeURIComponent(userEmail)}` : ''}`;
-        console.log('Initiating SLO to IdP:', sloUrl);
+        if (userProvider) {
+          // Redirect to SP-initiated SLO endpoint for user's tenant
+          const apiBaseUrl = 'https://userly-341i.onrender.com';
+          const sloUrl = `${apiBaseUrl}/api/saml/logout/${userProvider.id}${userEmail ? `?nameID=${encodeURIComponent(userEmail)}` : ''}`;
+          console.log('Initiating SLO to IdP for user\'s tenant:', sloUrl);
 
-        sessionStorage.removeItem('samlRedirected');
-        // Redirect to IdP logout
-        window.location.href = sloUrl;
-        return;
+          sessionStorage.removeItem('samlRedirected');
+          // Redirect to IdP logout
+          window.location.href = sloUrl;
+          return;
+        }
+      } catch (error) {
+        console.error('Failed to check SLO configuration:', error);
       }
-    } catch (error) {
-      console.error('Failed to check SLO configuration:', error);
     }
 
     // No SLO configured, redirect to login
