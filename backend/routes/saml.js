@@ -345,6 +345,140 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
   }
 });
 
+// Update SAML configuration
+router.put('/config/:id', authenticateToken, requireAdmin, upload.single('metadataFile'), async (req, res) => {
+  try {
+    const requestedId = req.params.id;
+    const id = parseInt(requestedId);
+    console.log('SAML config update request for id:', requestedId);
+
+    const { samlName, allowedDomains, issuerUrl, idpSsoUrl, idpSloUrl, idpCertificate,
+            enabled, tenantId, clientId, clientSecret, graphApiEnabled, samlAppId, securityGroupId } = req.body;
+
+    // Parse metadata file if provided
+    let parsedMetadata = null;
+    if (req.file) {
+      try {
+        const xmlData = fs.readFileSync(req.file.path, 'utf8');
+        const parser = new xml2js.Parser();
+        parsedMetadata = await parser.parseStringPromise(xmlData);
+
+        if (!issuerUrl && parsedMetadata.EntityDescriptor?.['$']?.entityID) {
+          req.body.issuerUrl = parsedMetadata.EntityDescriptor['$'].entityID;
+        }
+        if (!idpSsoUrl && parsedMetadata.EntityDescriptor?.IDPSSODescriptor?.[0]?.SingleSignOnService?.[0]?.['$']?.Location) {
+          req.body.idpSsoUrl = parsedMetadata.EntityDescriptor.IDPSSODescriptor[0].SingleSignOnService[0]['$'].Location;
+        }
+        if (!idpCertificate && parsedMetadata.EntityDescriptor?.IDPSSODescriptor?.[0]?.KeyDescriptor?.[0]?.KeyInfo?.[0]?.X509Data?.[0]?.X509Certificate?.[0]) {
+          req.body.idpCertificate = parsedMetadata.EntityDescriptor.IDPSSODescriptor[0].KeyDescriptor[0].KeyInfo[0].X509Data[0].X509Certificate[0];
+        }
+        if (!idpSloUrl && parsedMetadata.EntityDescriptor?.IDPSSODescriptor?.[0]?.SingleLogoutService?.[0]?.['$']?.Location) {
+          req.body.idpSloUrl = parsedMetadata.EntityDescriptor.IDPSSODescriptor[0].SingleLogoutService[0]['$'].Location;
+        }
+
+        fs.unlinkSync(req.file.path);
+      } catch (parseError) {
+        console.error('Error parsing metadata file:', parseError);
+        if (req.file && fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+      }
+    }
+
+    // Update in database
+    const { rows } = await pool.query(
+      `UPDATE saml_configs SET
+        saml_name = $1,
+        allowed_domains = $2,
+        issuer_url = $3,
+        idp_sso_url = $4,
+        idp_slo_url = $5,
+        idp_certificate = $6,
+        enabled = $7,
+        tenant_id = $8,
+        client_id = $9,
+        client_secret = $10,
+        graph_api_enabled = $11,
+        saml_app_id = $12,
+        security_group_id = $13,
+        updated_at = NOW()
+      WHERE id = $14
+      RETURNING *`,
+      [
+        samlName, allowedDomains, req.body.issuerUrl || issuerUrl,
+        req.body.idpSsoUrl || idpSsoUrl, req.body.idpSloUrl || idpSloUrl,
+        req.body.idpCertificate || idpCertificate, enabled === 'true' || enabled === true,
+        tenantId || null, clientId || null, clientSecret || null,
+        graphApiEnabled === 'true' || graphApiEnabled === true,
+        samlAppId || null, securityGroupId || null, id
+      ]
+    );
+
+    if (rows.length === 0) {
+      // Try as string ID for old configs
+      const { rows: rows2 } = await pool.query(
+        `UPDATE saml_configs SET
+          saml_name = $1,
+          allowed_domains = $2,
+          issuer_url = $3,
+          idp_sso_url = $4,
+          idp_slo_url = $5,
+          idp_certificate = $6,
+          enabled = $7,
+          tenant_id = $8,
+          client_id = $9,
+          client_secret = $10,
+          graph_api_enabled = $11,
+          saml_app_id = $12,
+          security_group_id = $13,
+          updated_at = NOW()
+        WHERE id::text = $14
+        RETURNING *`,
+        [
+          samlName, allowedDomains, req.body.issuerUrl || issuerUrl,
+          req.body.idpSsoUrl || idpSsoUrl, req.body.idpSloUrl || idpSloUrl,
+          req.body.idpCertificate || idpCertificate, enabled === 'true' || enabled === true,
+          tenantId || null, clientId || null, clientSecret || null,
+          graphApiEnabled === 'true' || graphApiEnabled === true,
+          samlAppId || null, securityGroupId || null, requestedId
+        ]
+      );
+      if (rows2.length === 0) {
+        return res.status(404).json({ message: 'Configuration not found' });
+      }
+    }
+
+    const updatedConfig = rows[0] || rows2[0];
+
+    // Update in-memory config
+    const configIndex = samlConfigs.findIndex(c => c.id == requestedId || parseInt(c.id) === id);
+    if (configIndex !== -1) {
+      const oldConfig = samlConfigs[configIndex];
+      const strategyName = `saml-${oldConfig.id}`;
+
+      // Remove old strategy
+      if (passport._strategies[strategyName]) {
+        delete passport._strategies[strategyName];
+      }
+
+      // Update config
+      samlConfigs[configIndex] = { ...oldConfig, ...updatedConfig };
+
+      // Re-register strategy if enabled
+      if (updatedConfig.enabled !== false) {
+        const strategy = getSamlStrategy(samlConfigs[configIndex]);
+        passport.use(strategyName, strategy);
+        console.log(`Re-registered updated SAML strategy: ${strategyName}`);
+      }
+    }
+
+    res.json({ message: 'Configuration updated successfully', config: updatedConfig });
+  } catch (error) {
+    console.error('Error updating SAML config:', error);
+    res.status(500).json({ message: 'Failed to update configuration: ' + error.message });
+  }
+});
+
 // Toggle SAML configuration enabled status
 router.patch('/config/:id/toggle', authenticateToken, requireAdmin, async (req, res) => {
   try {

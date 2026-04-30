@@ -24,6 +24,7 @@ const SamlConfig = () => {
   });
   const [existingConfigs, setExistingConfigs] = useState([]);
   const [showNewConfig, setShowNewConfig] = useState(false);
+  const [editingConfigId, setEditingConfigId] = useState(null);
 
   useEffect(() => {
     fetchConfigs();
@@ -74,17 +75,24 @@ const SamlConfig = () => {
         formData.append('metadataFile', config.metadataFile);
       }
 
-      console.log('Submitting SAML config:', {
+      console.log(editingConfigId ? 'Updating SAML config:' : 'Creating SAML config:', {
         samlName: config.samlName,
         allowedDomains: config.allowedDomains,
         hasMetadata: !!config.metadataFile
       });
 
-      const response = await api.post('/saml/config', formData);
-      console.log('SAML config saved successfully:', response.data);
+      let response;
+      if (editingConfigId) {
+        response = await api.put(`/saml/config/${editingConfigId}`, formData);
+        toast.success('SAML configuration updated successfully');
+      } else {
+        response = await api.post('/saml/config', formData);
+        toast.success('SAML configuration saved successfully');
+      }
+      console.log('SAML config saved:', response.data);
 
-      toast.success('SAML configuration saved successfully');
       setShowNewConfig(false);
+      setEditingConfigId(null);
       setConfig({
         samlName: '',
         allowedDomains: '',
@@ -110,6 +118,49 @@ const SamlConfig = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEdit = (cfg) => {
+    setEditingConfigId(cfg.id);
+    setConfig({
+      samlName: cfg.saml_name || '',
+      allowedDomains: cfg.allowed_domains || '',
+      issuerUrl: cfg.issuer_url || '',
+      idpSsoUrl: cfg.idp_sso_url || '',
+      idpSloUrl: cfg.idp_slo_url || '',
+      idpCertificate: cfg.idp_certificate || '',
+      metadataFile: null,
+      enabled: cfg.enabled !== false,
+      tenantId: cfg.tenant_id || '',
+      clientId: cfg.client_id || '',
+      clientSecret: cfg.client_secret || '',
+      graphApiEnabled: cfg.graph_api_enabled === true,
+      samlAppId: cfg.saml_app_id || '',
+      securityGroupId: cfg.security_group_id || ''
+    });
+    setShowNewConfig(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancel = () => {
+    setShowNewConfig(false);
+    setEditingConfigId(null);
+    setConfig({
+      samlName: '',
+      allowedDomains: '',
+      issuerUrl: '',
+      idpSsoUrl: '',
+      idpSloUrl: '',
+      idpCertificate: '',
+      metadataFile: null,
+      enabled: true,
+      tenantId: '',
+      clientId: '',
+      clientSecret: '',
+      graphApiEnabled: false,
+      samlAppId: '',
+      securityGroupId: ''
+    });
   };
 
   const handleDelete = async (id) => {
@@ -263,6 +314,15 @@ const SamlConfig = () => {
                           Metadata
                         </button>
                         <button
+                          onClick={() => handleEdit(cfg)}
+                          className="inline-flex items-center px-3 py-1 border border-indigo-300 text-sm font-medium rounded text-indigo-700 bg-white hover:bg-indigo-50"
+                        >
+                          <svg className="w-4 h-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                          Edit
+                        </button>
+                        <button
                           onClick={() => handleDelete(cfg.id)}
                           className="inline-flex items-center px-3 py-1 border border-red-300 text-sm font-medium rounded text-red-700 bg-white hover:bg-red-50"
                         >
@@ -291,7 +351,9 @@ const SamlConfig = () => {
           {/* New Configuration Form */}
           {showNewConfig && (
             <div className="bg-white shadow rounded-lg p-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-6">New SAML Configuration</h2>
+              <h2 className="text-xl font-semibold text-gray-900 mb-6">
+                {editingConfigId ? 'Edit SAML Configuration' : 'New SAML Configuration'}
+              </h2>
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">SAML Name</label>
@@ -549,7 +611,7 @@ const SamlConfig = () => {
                 <div className="flex justify-end space-x-3 pt-4">
                   <button
                     type="button"
-                    onClick={() => setShowNewConfig(false)}
+                    onClick={handleCancel}
                     className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
                   >
                     Cancel
@@ -559,7 +621,7 @@ const SamlConfig = () => {
                     disabled={loading}
                     className="px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
                   >
-                    {loading ? 'Saving...' : 'Save Configuration'}
+                    {loading ? (editingConfigId ? 'Updating...' : 'Saving...') : (editingConfigId ? 'Update Configuration' : 'Save Configuration')}
                   </button>
                 </div>
               </form>
