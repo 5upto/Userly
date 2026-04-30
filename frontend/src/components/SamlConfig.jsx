@@ -13,7 +13,12 @@ const SamlConfig = () => {
     idpSsoUrl: '',
     idpSloUrl: '',
     idpCertificate: '',
-    metadataFile: null
+    metadataFile: null,
+    enabled: true,
+    tenantId: '',
+    clientId: '',
+    clientSecret: '',
+    graphApiEnabled: false
   });
   const [existingConfigs, setExistingConfigs] = useState([]);
   const [showNewConfig, setShowNewConfig] = useState(false);
@@ -56,6 +61,11 @@ const SamlConfig = () => {
       formData.append('idpSsoUrl', config.idpSsoUrl);
       formData.append('idpSloUrl', config.idpSloUrl);
       formData.append('idpCertificate', config.idpCertificate);
+      formData.append('enabled', config.enabled);
+      formData.append('tenantId', config.tenantId);
+      formData.append('clientId', config.clientId);
+      formData.append('clientSecret', config.clientSecret);
+      formData.append('graphApiEnabled', config.graphApiEnabled);
       if (config.metadataFile) {
         formData.append('metadataFile', config.metadataFile);
       }
@@ -78,7 +88,12 @@ const SamlConfig = () => {
         idpSsoUrl: '',
         idpSloUrl: '',
         idpCertificate: '',
-        metadataFile: null
+        metadataFile: null,
+        enabled: true,
+        tenantId: '',
+        clientId: '',
+        clientSecret: '',
+        graphApiEnabled: false
       });
       fetchConfigs();
     } catch (error) {
@@ -101,6 +116,18 @@ const SamlConfig = () => {
     } catch (error) {
       console.error('Delete error:', error);
       toast.error('Failed to delete SAML configuration');
+    }
+  };
+
+  const handleToggle = async (id, currentEnabled) => {
+    try {
+      const newEnabled = !currentEnabled;
+      await api.patch(`/saml/config/${id}/toggle`, { enabled: newEnabled });
+      toast.success(`SAML configuration ${newEnabled ? 'enabled' : 'disabled'}`);
+      fetchConfigs();
+    } catch (error) {
+      console.error('Toggle error:', error);
+      toast.error('Failed to toggle configuration');
     }
   };
 
@@ -172,13 +199,44 @@ const SamlConfig = () => {
             ) : (
               <div className="space-y-4">
                 {existingConfigs.map((cfg) => (
-                  <div key={cfg.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                  <div key={cfg.id} className={`border rounded-lg p-4 hover:shadow-md transition-shadow ${cfg.enabled === false ? 'border-gray-200 bg-gray-50' : 'border-gray-200 bg-white'}`}>
                     <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <h3 className="font-semibold text-gray-900">{cfg.saml_name}</h3>
-                        <p className="text-sm text-gray-600">Domains: {cfg.allowed_domains}</p>
+                      <div className="flex items-center gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-semibold text-gray-900">{cfg.saml_name}</h3>
+                            {cfg.enabled === false ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
+                                Disabled
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                Active
+                              </span>
+                            )}
+                            {cfg.graph_api_enabled && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                Graph API
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-600 mt-1">Domains: {cfg.allowed_domains}</p>
+                          {cfg.tenant_id && (
+                            <p className="text-xs text-gray-500 mt-1">Tenant: {cfg.tenant_id}</p>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex space-x-2">
+                      <div className="flex items-center gap-2">
+                        {/* Toggle Switch */}
+                        <button
+                          onClick={() => handleToggle(cfg.id, cfg.enabled)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${cfg.enabled !== false ? 'bg-indigo-600' : 'bg-gray-200'}`}
+                          title={cfg.enabled !== false ? 'Click to disable' : 'Click to enable'}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${cfg.enabled !== false ? 'translate-x-6' : 'translate-x-1'}`}
+                          />
+                        </button>
                         <button
                           onClick={() => downloadMetadata(cfg.id)}
                           className="inline-flex items-center px-3 py-1 border border-gray-300 text-sm font-medium rounded text-gray-700 bg-white hover:bg-gray-50"
@@ -186,7 +244,7 @@ const SamlConfig = () => {
                           <svg className="w-4 h-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                           </svg>
-                          Download Metadata
+                          Metadata
                         </button>
                         <button
                           onClick={() => handleDelete(cfg.id)}
@@ -321,7 +379,110 @@ const SamlConfig = () => {
                   </div>
                 </div>
 
-                <div className="flex justify-end space-x-3">
+                {/* Graph API Configuration Section */}
+                <div className="border-t border-gray-200 pt-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-medium text-gray-900">Microsoft Graph API (Optional)</h3>
+                    <div className="flex items-center">
+                      <label className="flex items-center cursor-pointer">
+                        <div className="relative">
+                          <input
+                            type="checkbox"
+                            name="graphApiEnabled"
+                            checked={config.graphApiEnabled}
+                            onChange={(e) => setConfig({ ...config, graphApiEnabled: e.target.checked })}
+                            className="sr-only"
+                          />
+                          <div className={`block w-10 h-6 rounded-full transition-colors ${config.graphApiEnabled ? 'bg-blue-600' : 'bg-gray-300'}`}></div>
+                          <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${config.graphApiEnabled ? 'translate-x-4' : ''}`}></div>
+                        </div>
+                        <span className="ml-2 text-sm font-medium text-gray-700">
+                          {config.graphApiEnabled ? 'Enabled' : 'Disabled'}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Enable Graph API to sync user status and group memberships for this tenant. Each tenant needs its own app registration.
+                  </p>
+
+                  {config.graphApiEnabled && (
+                    <div className="space-y-4 bg-blue-50 p-4 rounded-lg">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Tenant ID <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          name="tenantId"
+                          value={config.tenantId}
+                          onChange={handleInputChange}
+                          placeholder="e.g., 12345678-1234-1234-1234-123456789012"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">Azure AD Tenant ID (Directory ID)</p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Application (Client) ID <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          name="clientId"
+                          value={config.clientId}
+                          onChange={handleInputChange}
+                          placeholder="e.g., 87654321-4321-4321-4321-210987654321"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">App Registration Client ID</p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Client Secret <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="password"
+                          name="clientSecret"
+                          value={config.clientSecret}
+                          onChange={handleInputChange}
+                          placeholder="Enter client secret value"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        />
+                        <p className="mt-1 text-xs text-gray-500">Client Secret from App Registration (keep secure)</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* SSO Enabled Toggle */}
+                <div className="border-t border-gray-200 pt-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-medium text-gray-900">SSO Status</h3>
+                      <p className="text-sm text-gray-600">Enable or disable SSO for this tenant</p>
+                    </div>
+                    <label className="flex items-center cursor-pointer">
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          name="enabled"
+                          checked={config.enabled}
+                          onChange={(e) => setConfig({ ...config, enabled: e.target.checked })}
+                          className="sr-only"
+                        />
+                        <div className={`block w-14 h-8 rounded-full transition-colors ${config.enabled ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+                        <div className={`dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform ${config.enabled ? 'translate-x-6' : ''}`}></div>
+                      </div>
+                      <span className="ml-3 text-sm font-medium text-gray-700">
+                        {config.enabled ? 'SSO Enabled' : 'SSO Disabled'}
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex justify-end space-x-3 pt-4">
                   <button
                     type="button"
                     onClick={() => setShowNewConfig(false)}

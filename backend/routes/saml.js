@@ -57,11 +57,11 @@ const loadSamlConfigsFromDb = async () => {
     const { rows } = await pool.query(
       'SELECT * FROM saml_configs ORDER BY created_at DESC'
     );
-    
+
     if (rows && rows.length > 0) {
       console.log(`Found ${rows.length} SAML configuration(s) in database`);
-      
-      // Transform database rows to config objects
+
+      // Transform database rows to config objects (including new multi-tenant fields)
       samlConfigs = rows.map(row => ({
         id: row.id,
         saml_name: row.saml_name,
@@ -70,17 +70,22 @@ const loadSamlConfigsFromDb = async () => {
         idp_sso_url: row.idp_sso_url,
         idp_slo_url: row.idp_slo_url,
         idp_certificate: row.idp_certificate,
+        enabled: row.enabled !== false, // default true
+        tenant_id: row.tenant_id,
+        client_id: row.client_id,
+        client_secret: row.client_secret,
+        graph_api_enabled: row.graph_api_enabled === true,
         created_at: row.created_at
       }));
-      
-      // Register each config's strategy with passport
-      samlConfigs.forEach(config => {
+
+      // Register each ENABLED config's strategy with passport
+      samlConfigs.filter(c => c.enabled !== false).forEach(config => {
         const strategy = getSamlStrategy(config);
         const strategyName = `saml-${config.id}`;
         passport.use(strategyName, strategy);
-        console.log(`Registered SAML strategy: ${strategyName}`);
+        console.log(`Registered SAML strategy: ${strategyName} (enabled: ${config.enabled})`);
       });
-      
+
       console.log('SAML configurations loaded and strategies registered successfully');
     } else {
       console.log('No SAML configurations found in database');
@@ -163,14 +168,17 @@ router.get('/configs', authenticateToken, requireAdmin, (req, res) => {
 });
 
 // Get SAML providers for login page (public, no auth required)
+// Only returns ENABLED configurations
 router.get('/providers', (req, res) => {
-  // Return minimal info needed for login page
-  const providers = samlConfigs.map(c => ({
-    id: c.id,
-    saml_name: c.saml_name,
-    allowed_domains: c.allowed_domains,
-    idp_slo_url: c.idp_slo_url
-  }));
+  // Return only enabled configurations for login page
+  const providers = samlConfigs
+    .filter(c => c.enabled !== false)
+    .map(c => ({
+      id: c.id,
+      saml_name: c.saml_name,
+      allowed_domains: c.allowed_domains,
+      idp_slo_url: c.idp_slo_url
+    }));
   res.json(providers);
 });
 
@@ -212,8 +220,9 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
     console.log('SAML config save request received');
     console.log('Request body keys:', Object.keys(req.body));
     console.log('Has file:', !!req.file);
-    const { samlName, allowedDomains, issuerUrl, idpSsoUrl, idpSloUrl, idpCertificate } = req.body;
-    console.log('Config name:', samlName);
+    const { samlName, allowedDomains, issuerUrl, idpSsoUrl, idpSloUrl, idpCertificate,
+            enabled, tenantId, clientId, clientSecret, graphApiEnabled } = req.body;
+    console.log('Config name:', samlName, 'Enabled:', enabled);
 
     // Parse metadata file if provided
     let parsedMetadata = null;
@@ -258,6 +267,11 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
       idp_sso_url: req.body.idpSsoUrl || idpSsoUrl,
       idp_slo_url: req.body.idpSloUrl || idpSloUrl,
       idp_certificate: req.body.idpCertificate || idpCertificate,
+      enabled: enabled === 'true' || enabled === true,
+      tenant_id: tenantId || null,
+      client_id: clientId || null,
+      client_secret: clientSecret || null,
+      graph_api_enabled: graphApiEnabled === 'true' || graphApiEnabled === true,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -265,8 +279,9 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
     // Save to database for persistence
     try {
       const { rows } = await pool.query(
-        `INSERT INTO saml_configs (id, saml_name, allowed_domains, issuer_url, idp_sso_url, idp_slo_url, idp_certificate, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `INSERT INTO saml_configs (id, saml_name, allowed_domains, issuer_url, idp_sso_url, idp_slo_url, idp_certificate,
+          enabled, tenant_id, client_id, client_secret, graph_api_enabled, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          ON CONFLICT (id) DO UPDATE SET
            saml_name = EXCLUDED.saml_name,
            allowed_domains = EXCLUDED.allowed_domains,
@@ -274,25 +289,36 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
            idp_sso_url = EXCLUDED.idp_sso_url,
            idp_slo_url = EXCLUDED.idp_slo_url,
            idp_certificate = EXCLUDED.idp_certificate,
+           enabled = EXCLUDED.enabled,
+           tenant_id = EXCLUDED.tenant_id,
+           client_id = EXCLUDED.client_id,
+           client_secret = EXCLUDED.client_secret,
+           graph_api_enabled = EXCLUDED.graph_api_enabled,
            updated_at = NOW()
          RETURNING *`,
         [config.id, config.saml_name, config.allowed_domains, config.issuer_url,
-         config.idp_sso_url, config.idp_slo_url, config.idp_certificate, config.created_at]
+         config.idp_sso_url, config.idp_slo_url, config.idp_certificate,
+         config.enabled, config.tenant_id, config.client_id, config.client_secret,
+         config.graph_api_enabled, config.created_at]
       );
-      console.log('SAML config saved to database:', rows[0].id);
+      console.log('SAML config saved to database:', rows[0].id, 'Enabled:', rows[0].enabled);
     } catch (dbError) {
       console.error('Failed to save SAML config to database:', dbError);
       // Continue with in-memory only if DB fails
     }
 
     samlConfigs.push(config);
-    
-    // Register the SAML strategy with passport
-    const strategy = getSamlStrategy(config);
-    const strategyName = `saml-${config.id}`;
-    passport.use(strategyName, strategy);
-    console.log(`Registered new SAML strategy: ${strategyName}`);
-    
+
+    // Register the SAML strategy with passport (only if enabled)
+    if (config.enabled !== false) {
+      const strategy = getSamlStrategy(config);
+      const strategyName = `saml-${config.id}`;
+      passport.use(strategyName, strategy);
+      console.log(`Registered new SAML strategy: ${strategyName}`);
+    } else {
+      console.log(`SAML config saved but disabled: ${config.id}`);
+    }
+
     res.status(201).json(config);
   } catch (error) {
     console.error('Error saving SAML config:', error);
@@ -300,10 +326,57 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
   }
 });
 
+// Toggle SAML configuration enabled status
+router.patch('/config/:id/toggle', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { enabled } = req.body;
+
+    console.log(`Toggling SAML config ${id} to enabled: ${enabled}`);
+
+    // Update in database
+    const { rows } = await pool.query(
+      `UPDATE saml_configs SET enabled = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [enabled, id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Configuration not found' });
+    }
+
+    // Update in memory
+    const configIndex = samlConfigs.findIndex(c => parseInt(c.id) === id);
+    if (configIndex !== -1) {
+      samlConfigs[configIndex].enabled = enabled;
+
+      // Register or unregister strategy based on enabled status
+      const config = samlConfigs[configIndex];
+      const strategyName = `saml-${config.id}`;
+
+      if (enabled) {
+        const strategy = getSamlStrategy(config);
+        passport.use(strategyName, strategy);
+        console.log(`Strategy ${strategyName} registered (enabled)`);
+      } else {
+        // Remove strategy from passport
+        if (passport._strategies[strategyName]) {
+          delete passport._strategies[strategyName];
+          console.log(`Strategy ${strategyName} unregistered (disabled)`);
+        }
+      }
+    }
+
+    res.json({ message: `Configuration ${enabled ? 'enabled' : 'disabled'}`, config: rows[0] });
+  } catch (error) {
+    console.error('Error toggling SAML config:', error);
+    res.status(500).json({ message: 'Failed to toggle configuration' });
+  }
+});
+
 // Delete SAML configuration
 router.delete('/config/:id', authenticateToken, requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
-  
+
   // Remove from database
   try {
     await pool.query('DELETE FROM saml_configs WHERE id = $1', [id]);
@@ -311,7 +384,16 @@ router.delete('/config/:id', authenticateToken, requireAdmin, async (req, res) =
   } catch (dbError) {
     console.error('Failed to delete SAML config from database:', dbError);
   }
-  
+
+  // Remove strategy from passport if exists
+  const config = samlConfigs.find(c => parseInt(c.id) === id);
+  if (config) {
+    const strategyName = `saml-${config.id}`;
+    if (passport._strategies[strategyName]) {
+      delete passport._strategies[strategyName];
+    }
+  }
+
   // Remove from memory - handle both string and number IDs
   const initialLength = samlConfigs.length;
   samlConfigs = samlConfigs.filter(config => parseInt(config.id) !== id);
@@ -350,13 +432,19 @@ router.get('/metadata/:id', (req, res) => {
 router.get('/login/:id', (req, res, next) => {
   try {
     console.log('SAML login initiation request for ID:', req.params.id);
-    console.log('Available configs:', samlConfigs.map(c => ({ id: c.id, name: c.saml_name })));
-    
+    console.log('Available configs:', samlConfigs.map(c => ({ id: c.id, name: c.saml_name, enabled: c.enabled })));
+
     const config = samlConfigs.find(c => c.id === parseInt(req.params.id));
-    
+
     if (!config) {
       console.error('SAML configuration not found for ID:', req.params.id);
       return res.status(404).json({ message: 'SAML configuration not found' });
+    }
+
+    // Check if config is enabled
+    if (config.enabled === false) {
+      console.error('SAML configuration is disabled:', req.params.id);
+      return res.status(403).json({ message: 'SAML SSO is disabled for this configuration' });
     }
 
     const strategyName = `saml-${config.id}`;
@@ -396,8 +484,14 @@ router.post('/acs', (req, res, next) => {
     const strategyName = `saml-${config.id}`;
     
     console.log('Using strategy:', strategyName);
+    // Check if config is enabled
+    if (config.enabled === false) {
+      console.error('SAML configuration is disabled:', config.id);
+      return res.redirect('https://userly-pro.vercel.app/login?error=saml_disabled');
+    }
+
     console.log('Config details:', { id: config.id, name: config.saml_name, ssoUrl: config.idp_sso_url });
-    
+
     // Use passport-saml authentication
     passport.authenticate(strategyName, { 
       failureRedirect: 'https://userly-pro.vercel.app/login?error=auth_failed',

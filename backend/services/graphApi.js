@@ -2,13 +2,88 @@ const https = require('https');
 const { blacklistToken } = require('../middleware/auth');
 const { pool } = require('../config/database');
 
-// Microsoft Graph API configuration
+// Microsoft Graph API configuration (legacy single-tenant support)
 const GRAPH_CLIENT_ID = process.env.GRAPH_CLIENT_ID;
 const GRAPH_CLIENT_SECRET = process.env.GRAPH_CLIENT_SECRET;
 const GRAPH_TENANT_ID = process.env.GRAPH_TENANT_ID;
 
 let accessToken = null;
 let tokenExpiry = 0;
+
+// Multi-tenant token cache: tenantId -> { token, expiry }
+const tenantTokenCache = new Map();
+
+// Get access token for a specific tenant using stored credentials
+async function getTenantGraphToken(tenantId, clientId, clientSecret) {
+  if (!tenantId || !clientId || !clientSecret) {
+    return null;
+  }
+
+  const cacheKey = `${tenantId}:${clientId}`;
+  const cached = tenantTokenCache.get(cacheKey);
+
+  // Return cached token if still valid (with 1 minute buffer)
+  if (cached && Date.now() < cached.expiry - 60000) {
+    return cached.token;
+  }
+
+  return new Promise((resolve, reject) => {
+    const postData = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope: 'https://graph.microsoft.com/.default',
+      grant_type: 'client_credentials'
+    }).toString();
+
+    const options = {
+      hostname: 'login.microsoftonline.com',
+      path: `/${tenantId}/oauth2/v2.0/token`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          const response = JSON.parse(data);
+          if (response.access_token) {
+            // Cache the token
+            tenantTokenCache.set(cacheKey, {
+              token: response.access_token,
+              expiry: Date.now() + (response.expires_in * 1000)
+            });
+            console.log(`Graph API token acquired for tenant: ${tenantId}`);
+            resolve(response.access_token);
+          } else {
+            console.error(`Failed to get Graph token for tenant ${tenantId}:`, response);
+            reject(new Error('Failed to acquire Graph token'));
+          }
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.write(postData);
+    req.end();
+  });
+}
+
+// Get Graph token for a specific SAML config
+async function getGraphTokenForConfig(config) {
+  // If config has tenant-specific credentials, use those
+  if (config.graph_api_enabled && config.tenant_id && config.client_id && config.client_secret) {
+    return getTenantGraphToken(config.tenant_id, config.client_id, config.client_secret);
+  }
+  // Fall back to global env vars (legacy mode)
+  return getGraphAccessToken();
+}
 
 // Get access token for Microsoft Graph using client credentials
 async function getGraphAccessToken() {
@@ -588,5 +663,9 @@ module.exports = {
   checkAuditLogsForGroupRemoval,
   getRecentGroupRemovals,
   pollUserStatus,
-  invalidateUserSessions
+  invalidateUserSessions,
+  // Multi-tenant exports
+  getTenantGraphToken,
+  getGraphTokenForConfig,
+  tenantTokenCache
 };

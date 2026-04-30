@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-toastify';
+import api from '../services/api';
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -10,6 +11,8 @@ const Login = () => {
   });
   const [loading, setLoading] = useState(false);
   const [blockedMessage, setBlockedMessage] = useState('');
+  const [samlProviders, setSamlProviders] = useState([]);
+  const [loadingProviders, setLoadingProviders] = useState(true);
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -26,6 +29,24 @@ const Login = () => {
       }
     }
   }, [searchParams]);
+
+  // Fetch enabled SAML providers
+  useEffect(() => {
+    const fetchSamlProviders = async () => {
+      try {
+        setLoadingProviders(true);
+        const response = await api.get('/saml/providers');
+        setSamlProviders(response.data || []);
+      } catch (error) {
+        console.error('Failed to fetch SAML providers:', error);
+        setSamlProviders([]);
+      } finally {
+        setLoadingProviders(false);
+      }
+    };
+
+    fetchSamlProviders();
+  }, []);
 
   const handleChange = (e) => {
     setFormData({
@@ -119,29 +140,39 @@ const Login = () => {
             </button>
           </div>
 
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-300"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-gray-50 text-gray-500">Or</span>
-              </div>
-            </div>
-
+          {/* SAML SSO Section - Only show if there are enabled providers */}
+          {samlProviders.length > 0 && (
             <div className="mt-6">
-              <button
-                type="button"
-                onClick={() => window.location.href = 'https://account.activedirectory.windowsazure.com/applications/signin/843718f4-582a-4b95-9f6a-c47527647ba3?tenantld=0d2c1116-d7c2-4380-b446-78e71d8f2465'}
-                className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
-              >
-                <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
-                Single Sign On
-              </button>
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300"></div>
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-gray-50 text-gray-500">Or continue with</span>
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                {loadingProviders ? (
+                  <div className="text-center text-sm text-gray-500">Loading SSO options...</div>
+                ) : (
+                  samlProviders.map((provider) => (
+                    <button
+                      key={provider.id}
+                      type="button"
+                      onClick={() => window.location.href = `${import.meta.env.VITE_API_URL || 'https://userly-341i.onrender.com'}/api/saml/login/${provider.id}`}
+                      className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
+                    >
+                      <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      </svg>
+                      {provider.saml_name || 'Single Sign On'}
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="text-center">
             <span className="text-sm text-gray-600">

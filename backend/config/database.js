@@ -54,6 +54,28 @@ const initDatabase = async () => {
       ADD COLUMN IF NOT EXISTS idp_slo_url TEXT
     `);
 
+    // Migration: Add multi-tenant SSO columns - enabled toggle and Graph API credentials
+    await client.query(`
+      ALTER TABLE saml_configs 
+      ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT true
+    `);
+    await client.query(`
+      ALTER TABLE saml_configs 
+      ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(255)
+    `);
+    await client.query(`
+      ALTER TABLE saml_configs 
+      ADD COLUMN IF NOT EXISTS client_id VARCHAR(255)
+    `);
+    await client.query(`
+      ALTER TABLE saml_configs 
+      ADD COLUMN IF NOT EXISTS client_secret TEXT
+    `);
+    await client.query(`
+      ALTER TABLE saml_configs 
+      ADD COLUMN IF NOT EXISTS graph_api_enabled BOOLEAN DEFAULT false
+    `);
+
     // Create user_sessions table for tracking active SAML sessions (for Graph API polling)
     await client.query(`
       CREATE TABLE IF NOT EXISTS user_sessions (
