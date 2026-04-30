@@ -75,6 +75,7 @@ const loadSamlConfigsFromDb = async () => {
         client_id: row.client_id,
         client_secret: row.client_secret,
         graph_api_enabled: row.graph_api_enabled === true,
+        saml_app_id: row.saml_app_id,
         created_at: row.created_at
       }));
 
@@ -177,7 +178,10 @@ router.get('/providers', (req, res) => {
       id: c.id,
       saml_name: c.saml_name,
       allowed_domains: c.allowed_domains,
-      idp_slo_url: c.idp_slo_url
+      issuer_url: c.issuer_url,
+      idp_slo_url: c.idp_slo_url,
+      tenant_id: c.tenant_id,
+      saml_app_id: c.saml_app_id
     }));
   res.json(providers);
 });
@@ -230,7 +234,7 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
     console.log('Request body keys:', Object.keys(req.body));
     console.log('Has file:', !!req.file);
     const { samlName, allowedDomains, issuerUrl, idpSsoUrl, idpSloUrl, idpCertificate,
-            enabled, tenantId, clientId, clientSecret, graphApiEnabled } = req.body;
+            enabled, tenantId, clientId, clientSecret, graphApiEnabled, samlAppId } = req.body;
     console.log('Config name:', samlName, 'Enabled:', enabled);
 
     // Parse metadata file if provided
@@ -281,6 +285,7 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
       client_id: clientId || null,
       client_secret: clientSecret || null,
       graph_api_enabled: graphApiEnabled === 'true' || graphApiEnabled === true,
+      saml_app_id: samlAppId || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -294,17 +299,18 @@ router.post('/config', authenticateToken, requireAdmin, upload.single('metadataF
       await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS client_id VARCHAR(255)`);
       await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS client_secret TEXT`);
       await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS graph_api_enabled BOOLEAN DEFAULT false`);
+      await pool.query(`ALTER TABLE saml_configs ADD COLUMN IF NOT EXISTS saml_app_id VARCHAR(255)`);
 
       // Insert new config - use serial id from DB, not the Date.now()
       const { rows } = await pool.query(
         `INSERT INTO saml_configs (saml_name, allowed_domains, issuer_url, idp_sso_url, idp_slo_url, idp_certificate,
-          enabled, tenant_id, client_id, client_secret, graph_api_enabled)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          enabled, tenant_id, client_id, client_secret, graph_api_enabled, saml_app_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING *`,
         [config.saml_name, config.allowed_domains, config.issuer_url,
          config.idp_sso_url, config.idp_slo_url, config.idp_certificate,
          config.enabled, config.tenant_id, config.client_id, config.client_secret,
-         config.graph_api_enabled]
+         config.graph_api_enabled, config.saml_app_id]
       );
       savedConfig = rows[0];
       // Update config with DB id
@@ -415,9 +421,12 @@ router.delete('/config/:id', authenticateToken, requireAdmin, async (req, res) =
 
 // Generate SAML metadata for service provider
 router.get('/metadata/:id', (req, res) => {
-  const config = samlConfigs.find(c => c.id === parseInt(req.params.id));
-  
+  const id = parseInt(req.params.id);
+  const config = samlConfigs.find(c => parseInt(c.id) === id);
+
   if (!config) {
+    console.error('Metadata download: Config not found for id:', id);
+    console.error('Available configs:', samlConfigs.map(c => ({ id: c.id, name: c.saml_name })));
     return res.status(404).json({ message: 'Configuration not found' });
   }
 
@@ -485,52 +494,70 @@ router.post('/acs', (req, res, next) => {
     console.log('SAMLResponse present:', !!req.body.SAMLResponse);
     console.log('RelayState:', req.body.RelayState);
     console.log('Available SAML configs:', samlConfigs.length);
-    
-    // Use the first available config for authentication
+
     if (samlConfigs.length === 0) {
-      console.error('No SAML configuration found - configs may have been lost on server restart');
+      console.error('No SAML configuration found');
       return res.redirect('https://userly-pro.vercel.app/login?error=no_saml_config');
     }
-    
-    const config = samlConfigs[0];
-    const strategyName = `saml-${config.id}`;
-    
-    console.log('Using strategy:', strategyName);
-    // Check if config is enabled
-    if (config.enabled === false) {
-      console.error('SAML configuration is disabled:', config.id);
-      return res.redirect('https://userly-pro.vercel.app/login?error=saml_disabled');
-    }
 
-    console.log('Config details:', { id: config.id, name: config.saml_name, ssoUrl: config.idp_sso_url });
+    // For multi-tenant, we need to identify which config was used from the SAML response
+    // The SAML response contains Issuer which we can match to our configs
+    // For now, try each enabled config until one works
+    let currentConfigIndex = 0;
 
-    // Use passport-saml authentication
-    passport.authenticate(strategyName, { 
-      failureRedirect: 'https://userly-pro.vercel.app/login?error=auth_failed',
-      failureFlash: true,
-      session: false 
-    }, (err, profile) => {
-      if (err) {
-        console.error('Passport authentication error:', err);
-        console.error('Error type:', err.name);
-        console.error('Error message:', err.message);
-        // Handle account blocked error specially
-        if (err.name === 'AccountBlockedError') {
-          return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=account_locked');
+    const tryNextConfig = () => {
+      // Find next enabled config
+      while (currentConfigIndex < samlConfigs.length) {
+        const cfg = samlConfigs[currentConfigIndex];
+        if (cfg.enabled !== false) {
+          break;
         }
-        const errorMsg = encodeURIComponent(err.message || 'Unknown error');
-        return res.redirect(`https://userly-pro.vercel.app/login?error=passport_error&details=${errorMsg}`);
+        currentConfigIndex++;
       }
-      if (!profile) {
-        console.error('No profile returned from passport');
-        return res.redirect('https://userly-pro.vercel.app/login?error=no_profile');
+
+      if (currentConfigIndex >= samlConfigs.length) {
+        console.error('No enabled SAML configuration found');
+        return res.redirect('https://userly-pro.vercel.app/login?error=no_enabled_saml_config');
       }
-      
-      console.log('SAML authentication successful, profile:', profile);
-      
-      // Handle user creation/update and token generation
-      handleSamlUser(profile, res);
-    })(req, res, next);
+
+      const config = samlConfigs[currentConfigIndex];
+      const strategyName = `saml-${config.id}`;
+
+      console.log('Trying strategy:', strategyName, 'for config:', config.saml_name);
+
+      passport.authenticate(strategyName, {
+        failureRedirect: 'https://userly-pro.vercel.app/login?error=auth_failed',
+        failureFlash: true,
+        session: false
+      }, (err, profile, info) => {
+        if (err) {
+          // If this config fails, try next one
+          if (err.name === 'Error' && err.message?.includes('Invalid')) {
+            console.log(`Strategy ${strategyName} failed, trying next...`);
+            currentConfigIndex++;
+            return tryNextConfig();
+          }
+          console.error('Passport authentication error:', err);
+          if (err.name === 'AccountBlockedError') {
+            return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=account_locked');
+          }
+          const errorMsg = encodeURIComponent(err.message || 'Unknown error');
+          return res.redirect(`https://userly-pro.vercel.app/login?error=passport_error&details=${errorMsg}`);
+        }
+        if (!profile) {
+          console.error('No profile returned from passport');
+          return res.redirect('https://userly-pro.vercel.app/login?error=no_profile');
+        }
+
+        console.log('SAML authentication successful with config:', config.id, config.saml_name);
+        console.log('Profile:', profile);
+
+        // Pass the config to handleSamlUser so it can use tenant-specific Graph API
+        handleSamlUser(profile, res, config);
+      })(req, res, next);
+    };
+
+    tryNextConfig();
   } catch (error) {
     console.error('SAML ACS error:', error);
     console.error('Error stack:', error.stack);
@@ -539,12 +566,13 @@ router.post('/acs', (req, res, next) => {
   }
 });
 
-async function handleSamlUser(profile, res) {
+async function handleSamlUser(profile, res, samlConfig) {
   try {
     const email = profile.nameID || profile.email;
     const name = profile.displayName || profile.name || email.split('@')[0];
 
     console.log('Extracted user info - email:', email, 'name:', name);
+    console.log('Using SAML config:', samlConfig ? { id: samlConfig.id, name: samlConfig.saml_name, tenant_id: samlConfig.tenant_id } : 'none');
 
     // Check if user exists
     const { rows: existingUsers } = await pool.query(
@@ -578,18 +606,41 @@ async function handleSamlUser(profile, res) {
       );
     }
 
-    // Generate short-lived JWT token (15 min) for SAML users to enable SLO detection
-    console.log('Generating JWT token...');
+    // Store tenant-specific Graph API credentials in the token for per-tenant Graph API access
+    const tenantGraphCreds = samlConfig && samlConfig.graph_api_enabled ? {
+      tenantId: samlConfig.tenant_id,
+      clientId: samlConfig.client_id,
+      clientSecret: samlConfig.client_secret,
+      graphApiEnabled: samlConfig.graph_api_enabled
+    } : null;
+
+    // Generate short-lived JWT token (15 min) for SAML users
+    console.log('Generating JWT token with tenant info...');
     const token = jwt.sign(
-      { userId: user.id, email: user.email, name: user.name, role: user.role || 'standard', authType: 'saml' },
+      {
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role || 'standard',
+        authType: 'saml',
+        samlConfigId: samlConfig ? samlConfig.id : null,
+        tenantGraphCreds: tenantGraphCreds
+      },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '15m' }
     );
 
-    // Generate refresh token (24h) for silent renewal with auth time for max session tracking
+    // Generate refresh token (24h) with tenant info
     const now = Date.now();
     const refreshToken = jwt.sign(
-      { userId: user.id, email: user.email, authType: 'saml_refresh', authTime: now },
+      {
+        userId: user.id,
+        email: user.email,
+        authType: 'saml_refresh',
+        authTime: now,
+        samlConfigId: samlConfig ? samlConfig.id : null,
+        tenantGraphCreds: tenantGraphCreds
+      },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }
     );

@@ -86,6 +86,11 @@ const initDatabase = async () => {
       ALTER TABLE saml_configs 
       ADD COLUMN IF NOT EXISTS graph_api_enabled BOOLEAN DEFAULT false
     `);
+    // SAML App ID for Azure AD MyApps link (Enterprise Application ID)
+    await client.query(`
+      ALTER TABLE saml_configs 
+      ADD COLUMN IF NOT EXISTS saml_app_id VARCHAR(255)
+    `);
 
     // Create user_sessions table for tracking active SAML sessions (for Graph API polling)
     await client.query(`

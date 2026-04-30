@@ -18,7 +18,8 @@ const SamlConfig = () => {
     tenantId: '',
     clientId: '',
     clientSecret: '',
-    graphApiEnabled: false
+    graphApiEnabled: false,
+    samlAppId: ''
   });
   const [existingConfigs, setExistingConfigs] = useState([]);
   const [showNewConfig, setShowNewConfig] = useState(false);
@@ -66,6 +67,7 @@ const SamlConfig = () => {
       formData.append('clientId', config.clientId);
       formData.append('clientSecret', config.clientSecret);
       formData.append('graphApiEnabled', config.graphApiEnabled);
+      formData.append('samlAppId', config.samlAppId);
       if (config.metadataFile) {
         formData.append('metadataFile', config.metadataFile);
       }
@@ -93,7 +95,8 @@ const SamlConfig = () => {
         tenantId: '',
         clientId: '',
         clientSecret: '',
-        graphApiEnabled: false
+        graphApiEnabled: false,
+        samlAppId: ''
       });
       fetchConfigs();
     } catch (error) {
@@ -122,12 +125,16 @@ const SamlConfig = () => {
   const handleToggle = async (id, currentEnabled) => {
     try {
       const newEnabled = !currentEnabled;
-      await api.patch(`/saml/config/${id}/toggle`, { enabled: newEnabled });
+      console.log(`Toggling config ${id} from ${currentEnabled} to ${newEnabled}`);
+      const response = await api.patch(`/saml/config/${id}/toggle`, { enabled: newEnabled });
+      console.log('Toggle response:', response.data);
       toast.success(`SAML configuration ${newEnabled ? 'enabled' : 'disabled'}`);
       fetchConfigs();
     } catch (error) {
       console.error('Toggle error:', error);
-      toast.error('Failed to toggle configuration');
+      console.error('Error response:', error.response?.data);
+      const errorMsg = error.response?.data?.message || error.message || 'Unknown error';
+      toast.error(`Failed to toggle: ${errorMsg}`);
     }
   };
 
@@ -460,6 +467,30 @@ const SamlConfig = () => {
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* Azure AD MyApps Configuration */}
+                <div className="border-t border-gray-200 pt-6">
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Azure AD MyApps Link (Optional)</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Enterprise Application ID for direct Azure AD MyApps sign-in link.
+                  </p>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      SAML App ID (Enterprise Application ID)
+                    </label>
+                    <input
+                      type="text"
+                      name="samlAppId"
+                      value={config.samlAppId}
+                      onChange={handleInputChange}
+                      placeholder="e.g., 843718f4-582a-4b95-9f6a-c47527647ba3"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      Found in Azure AD → Enterprise Applications → Application ID
+                    </p>
+                  </div>
                 </div>
 
                 {/* SSO Enabled Toggle */}
