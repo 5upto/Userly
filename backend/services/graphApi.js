@@ -724,29 +724,52 @@ async function invalidateUserSessions(userId, reason) {
 
 // Poll for group removals via audit logs (more frequent)
 async function pollAuditLogsForGroupRemovals() {
-  const securityGroupId = process.env.SAML_SECURITY_GROUP_ID;
-  if (!securityGroupId) return;
-
   try {
-    // Check audit logs for recent group removals
-    const removedUsers = await getRecentGroupRemovals(securityGroupId);
+    // Get all SAML configs with security groups
+    const { rows: configs } = await pool.query(
+      `SELECT tenant_id, client_id, client_secret, security_group_id, saml_name
+       FROM saml_configs
+       WHERE graph_api_enabled = true
+       AND security_group_id IS NOT NULL
+       AND tenant_id IS NOT NULL
+       AND client_id IS NOT NULL
+       AND client_secret IS NOT NULL`
+    );
 
-    if (removedUsers.length === 0) return;
+    if (configs.length === 0) {
+      return;
+    }
 
-    console.log(`Found ${removedUsers.length} users removed from security group in audit logs`);
+    // Check each tenant's audit logs for group removals
+    for (const config of configs) {
+      try {
+        const token = await getTenantGraphToken(config.tenant_id, config.client_id, config.client_secret);
+        if (!token) continue;
 
-    // For each removed user, invalidate their sessions
-    for (const email of removedUsers) {
-      // Find user in database
-      const { rows: users } = await pool.query(
-        'SELECT id FROM users WHERE LOWER(email) = LOWER($1)',
-        [email]
-      );
+        // Check audit logs for recent group removals
+        const removedUsers = await getRecentGroupRemovals(config.security_group_id, token);
 
-      if (users.length > 0) {
-        const userId = users[0].id;
-        console.log(`Invalidating sessions for removed user: ${email}`);
-        await invalidateUserSessions(userId, 'User removed from security group');
+        if (removedUsers.length === 0) continue;
+
+        console.log(`Found ${removedUsers.length} users removed from security group in tenant ${config.tenant_id} (${config.saml_name})`);
+
+        // For each removed user, invalidate their sessions
+        for (const email of removedUsers) {
+          // Find user in database
+          const { rows: users } = await pool.query(
+            'SELECT id FROM users WHERE LOWER(email) = LOWER($1)',
+            [email]
+          );
+
+          if (users.length > 0) {
+            const userId = users[0].id;
+            console.log(`Invalidating sessions for removed user: ${email}`);
+            await invalidateUserSessions(userId, 'User removed from security group');
+          }
+        }
+      } catch (err) {
+        console.error(`Error checking audit logs for tenant ${config.tenant_id}:`, err.message);
+        continue;
       }
     }
   } catch (error) {
@@ -755,8 +778,7 @@ async function pollAuditLogsForGroupRemovals() {
 }
 
 // Get list of users recently removed from the security group
-async function getRecentGroupRemovals(securityGroupId) {
-  const token = await getGraphAccessToken();
+async function getRecentGroupRemovals(securityGroupId, token) {
   if (!token) return [];
 
   // Check last 2 minutes of audit logs (more frequent polling)
@@ -783,24 +805,17 @@ async function getRecentGroupRemovals(securityGroupId) {
             const audits = response.value || [];
 
             const removedUsers = [];
-
             for (const audit of audits) {
-              const targetResources = audit.targetResources || [];
-
-              // Check if this audit is about our target group
-              const isTargetGroup = targetResources.some(tr =>
-                tr.id === securityGroupId && tr.type === 'Group'
-              );
-
-              if (isTargetGroup) {
-                // Find the user that was removed
-                const removedUser = targetResources.find(tr =>
-                  tr.type === 'User' && tr.userPrincipalName
-                );
-
-                if (removedUser) {
-                  removedUsers.push(removedUser.userPrincipalName);
-                  console.log(`Audit log: User ${removedUser.userPrincipalName} removed from group ${securityGroupId}`);
+              // Check if this audit is for our security group
+              if (audit.targetResources && audit.targetResources.length > 0) {
+                const groupResource = audit.targetResources.find(r => r.type === 'Group');
+                if (groupResource && groupResource.id === securityGroupId) {
+                  // Extract the user who was removed
+                  const userResource = audit.targetResources.find(r => r.type === 'User');
+                  if (userResource && userResource.userPrincipalName) {
+                    removedUsers.push(userResource.userPrincipalName);
+                    console.log(`Audit log: User ${userResource.userPrincipalName} removed from group ${securityGroupId}`);
+                  }
                 }
               }
             }
@@ -848,7 +863,7 @@ async function isGraphApiConfigured() {
   }
 }
 
-// Start polling (every 2 minutes for status, every 30 seconds for audit logs)
+// Start polling (every 30 seconds for faster detection)
 async function startUserStatusPolling() {
   const hasGraphConfig = await isGraphApiConfigured();
 
@@ -857,19 +872,17 @@ async function startUserStatusPolling() {
     return;
   }
 
-  console.log('Starting Entra user status polling (every 2 minutes)');
+  console.log('Starting Entra user status polling (every 30 seconds)');
   console.log('Starting audit log polling for group removals (every 30 seconds)');
 
   // Run immediately on start
   pollUserStatus();
 
-  // Then every 2 minutes for user status
-  setInterval(pollUserStatus, 2 * 60 * 1000);
+  // Poll every 30 seconds for faster detection
+  setInterval(pollUserStatus, 30 * 1000);
 
   // Poll audit logs every 30 seconds for faster group removal detection
-  if (process.env.SAML_SECURITY_GROUP_ID) {
-    setInterval(pollAuditLogsForGroupRemovals, 30 * 1000);
-  }
+  setInterval(pollAuditLogsForGroupRemovals, 30 * 1000);
 }
 
 module.exports = {
