@@ -12,7 +12,7 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [blockedMessage, setBlockedMessage] = useState('');
   const [samlProviders, setSamlProviders] = useState([]);
-  const [loadingProviders, setLoadingProviders] = useState(true);
+  const [loadingProviders, setLoadingProviders] = useState(false);
   const [showProviderModal, setShowProviderModal] = useState(false);
 
   const { login } = useAuth();
@@ -149,56 +149,56 @@ const Login = () => {
           </div>
 
           {/* SAML SSO Section */}
-          {samlProviders.length > 0 && (
-            <div className="mt-6">
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-300"></div>
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-gray-50 text-gray-500">Or</span>
-                </div>
+          <div className="mt-6">
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-300"></div>
               </div>
-
-              <div className="mt-6">
-                {samlProviders.length === 1 ? (
-                  // Single provider: direct redirect
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const provider = samlProviders[0];
-                      // Use Azure AD MyApps direct link if saml_app_id is configured
-                      if (provider.saml_app_id && provider.tenant_id) {
-                        const azureAdUrl = `https://account.activedirectory.windowsazure.com/applications/signin/${provider.saml_app_id}?tenantId=${provider.tenant_id}`;
-                        window.location.href = azureAdUrl;
-                      } else {
-                        // Fallback to backend SAML login endpoint
-                        window.location.href = `${import.meta.env.VITE_API_URL || 'https://userly-341i.onrender.com'}/api/saml/login/${provider.id}`;
-                      }
-                    }}
-                    className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
-                  >
-                    <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
-                    Single Sign On
-                  </button>
-                ) : (
-                  // Multiple providers: show selection modal
-                  <button
-                    type="button"
-                    onClick={() => setShowProviderModal(true)}
-                    className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
-                  >
-                    <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
-                    Single Sign On
-                  </button>
-                )}
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-gray-50 text-gray-500">Or</span>
               </div>
             </div>
-          )}
+
+            <div className="mt-6">
+              {samlProviders.length === 1 ? (
+                // Single provider: direct redirect
+                <button
+                  type="button"
+                  onClick={() => {
+                    const provider = samlProviders[0];
+                    // Use Azure AD MyApps direct link if saml_app_id is configured
+                    if (provider.saml_app_id && provider.tenant_id) {
+                      const azureAdUrl = `https://account.activedirectory.windowsazure.com/applications/signin/${provider.saml_app_id}?tenantId=${provider.tenant_id}`;
+                      window.location.href = azureAdUrl;
+                    } else {
+                      // Fallback to backend SAML login endpoint
+                      window.location.href = `${import.meta.env.VITE_API_URL || 'https://userly-341i.onrender.com'}/api/saml/login/${provider.id}`;
+                    }
+                  }}
+                  disabled={samlProviders.length === 0}
+                  className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200 disabled:opacity-50"
+                >
+                  <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                  {samlProviders.length === 0 ? 'Loading...' : 'Single Sign On'}
+                </button>
+              ) : (
+                // Multiple providers: show selection modal
+                <button
+                  type="button"
+                  onClick={() => setShowProviderModal(true)}
+                  disabled={samlProviders.length === 0}
+                  className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200 disabled:opacity-50"
+                >
+                  <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                  {samlProviders.length === 0 ? 'Loading...' : 'Single Sign On'}
+                </button>
+              )}
+            </div>
+          </div>
 
           {/* SAML Provider Selection Modal */}
           {showProviderModal && (
