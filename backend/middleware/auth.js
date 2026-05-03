@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
-const { checkUserStatusInEntra, checkUserGroupMembership, getTenantGraphToken } = require('../services/graphApi');
+const { checkUserStatusInEntra, checkUserGroupMembership, getTenantGraphToken, findUserAndGetToken } = require('../services/graphApi');
 const { isTokenBlacklisted, blacklistToken } = require('../services/tokenBlacklist');
 
 const authenticateToken = async (req, res, next) => {
@@ -36,24 +36,58 @@ const authenticateToken = async (req, res, next) => {
 
     // For SAML users, optionally check real-time status in Entra (if Graph API configured)
     // This enables instant detection of blocks but adds ~200-500ms to API calls
-    if (decoded.authType === 'saml' && decoded.tenantGraphCreds) {
-      const creds = decoded.tenantGraphCreds;
-      if (creds.graphApiEnabled && creds.tenantId && creds.clientId && creds.clientSecret) {
-        try {
-          // Get tenant-specific token
-          const graphToken = await getTenantGraphToken(creds.tenantId, creds.clientId, creds.clientSecret);
+    if (decoded.authType === 'saml') {
+      try {
+        let graphToken = null;
+        let effectiveConfig = null;
 
-          if (!graphToken) {
-            console.log(`Failed to get Graph token for ${user.email}'s tenant, skipping real-time check`);
-          } else {
-            // Check 1: Is user blocked in Entra?
-            const entraStatus = await checkUserStatusInEntra(user.email, graphToken);
+        // First, try the tenant from the JWT token (if available)
+        if (decoded.tenantGraphCreds) {
+          const creds = decoded.tenantGraphCreds;
+          if (creds.graphApiEnabled && creds.tenantId && creds.clientId && creds.clientSecret) {
+            graphToken = await getTenantGraphToken(creds.tenantId, creds.clientId, creds.clientSecret);
+            effectiveConfig = creds;
+          }
+        }
 
-            // If user not found in this tenant (external/federated user), skip all Graph API checks
-            if (entraStatus && entraStatus.wrongTenant) {
-              console.log(`User ${user.email} not found in tenant (external/federated), skipping Graph API checks`);
-            } else if (entraStatus && entraStatus.blocked) {
-              console.log(`Real-time block detected for ${user.email} in Entra`);
+        // If no token from JWT or user not found in that tenant, search across all configured tenants
+        if (!graphToken) {
+          console.log(`Searching for user ${user.email} across all configured tenants...`);
+          const tenantInfo = await findUserAndGetToken(user.email);
+          if (tenantInfo) {
+            graphToken = tenantInfo.token;
+            effectiveConfig = tenantInfo.config;
+          }
+        }
+
+        if (!graphToken) {
+          console.log(`No Graph API token available for ${user.email}, skipping real-time check`);
+        } else {
+          // Check 1: Is user blocked in Entra?
+          const entraStatus = await checkUserStatusInEntra(user.email, graphToken);
+
+          if (entraStatus && entraStatus.blocked) {
+            console.log(`Real-time block detected for ${user.email} in Entra`);
+
+            // Blacklist current token
+            blacklistToken(token);
+
+            // Update local user status
+            await pool.query('UPDATE users SET status = $1 WHERE id = $2', ['blocked', user.id]);
+
+            return res.status(403).json({
+              message: 'Account blocked in Entra ID',
+              redirect: true,
+              reason: 'blocked'
+            });
+          }
+
+          // Check 2: Real-time check - is user still in their tenant's security group?
+          const securityGroupId = effectiveConfig?.security_group_id;
+          if (securityGroupId) {
+            const membership = await checkUserGroupMembership(user.email, securityGroupId, graphToken);
+            if (membership && !membership.isMember) {
+              console.log(`Real-time: User ${user.email} not in security group ${securityGroupId}`);
 
               // Blacklist current token
               blacklistToken(token);
@@ -62,38 +96,17 @@ const authenticateToken = async (req, res, next) => {
               await pool.query('UPDATE users SET status = $1 WHERE id = $2', ['blocked', user.id]);
 
               return res.status(403).json({
-                message: 'Account blocked in Entra ID',
+                message: 'Access revoked: User removed from security group',
                 redirect: true,
-                reason: 'blocked'
+                forceReauth: true,
+                reason: 'security_group'
               });
             }
-
-            // Check 2: Real-time check - is user still in their tenant's security group?
-            // Only check if user exists in this tenant (skip for external users)
-            if (creds.securityGroupId && !(entraStatus && entraStatus.wrongTenant)) {
-              const membership = await checkUserGroupMembership(user.email, creds.securityGroupId, graphToken);
-              if (membership && !membership.isMember) {
-                console.log(`Real-time: User ${user.email} not in security group ${creds.securityGroupId}`);
-
-                // Blacklist current token
-                blacklistToken(token);
-
-                // Update local user status
-                await pool.query('UPDATE users SET status = $1 WHERE id = $2', ['blocked', user.id]);
-
-                return res.status(403).json({
-                  message: 'Access revoked: User removed from security group',
-                  redirect: true,
-                  forceReauth: true,
-                  reason: 'security_group'
-                });
-              }
-            }
           }
-        } catch (graphError) {
-          // Don't fail the request if Graph API check fails
-          console.error('Graph API real-time check failed:', graphError.message);
         }
+      } catch (graphError) {
+        // Don't fail the request if Graph API check fails
+        console.error('Graph API real-time check failed:', graphError.message);
       }
     }
 

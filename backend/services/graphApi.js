@@ -530,6 +530,51 @@ async function getGraphTokenForUser(email) {
   }
 }
 
+// Find user across all configured SAML tenants
+async function findUserAndGetToken(email) {
+  try {
+    // Get all SAML configs with Graph API enabled
+    const { rows: configs } = await pool.query(
+      `SELECT id, tenant_id, client_id, client_secret, graph_api_enabled, security_group_id, saml_name
+       FROM saml_configs
+       WHERE graph_api_enabled = true
+       AND tenant_id IS NOT NULL
+       AND client_id IS NOT NULL
+       AND client_secret IS NOT NULL`
+    );
+
+    if (configs.length === 0) {
+      console.log(`No SAML configs with Graph API enabled`);
+      return null;
+    }
+
+    // Try each config to find the user
+    for (const config of configs) {
+      try {
+        const token = await getTenantGraphToken(config.tenant_id, config.client_id, config.client_secret);
+        if (!token) continue;
+
+        // Try to find user in this tenant
+        const userId = await getUserIdByEmail(email, token);
+
+        if (userId) {
+          console.log(`Found user ${email} in tenant ${config.tenant_id} (${config.saml_name})`);
+          return { token, config, userId };
+        }
+      } catch (err) {
+        // Continue to next config
+        continue;
+      }
+    }
+
+    console.log(`User ${email} not found in any configured tenant`);
+    return null;
+  } catch (error) {
+    console.error('Error finding user across tenants:', error);
+    return null;
+  }
+}
+
 // Poll all SAML users and invalidate sessions of blocked/revoked users
 async function pollUserStatus() {
   try {
@@ -548,26 +593,22 @@ async function pollUserStatus() {
     console.log(`Polling ${activeUsers.length} active SAML users against Entra...`);
 
     for (const user of activeUsers) {
-      // Get tenant-specific credentials for this user
-      const { token, config } = await getGraphTokenForUser(user.email);
+      // Find user across all configured tenants
+      const tenantInfo = await findUserAndGetToken(user.email);
 
-      if (!token) {
-        console.log(`No Graph API token available for ${user.email}, skipping`);
+      if (!tenantInfo) {
+        console.log(`User ${user.email} not found in any Entra tenant, skipping checks`);
         continue;
       }
+
+      const { token, config } = tenantInfo;
 
       // Check 1: Is user blocked/disabled in Entra?
       const entraStatus = await checkUserStatusInEntra(user.email, token);
 
       if (entraStatus && entraStatus.blocked) {
-        console.log(`User ${user.email} is BLOCKED in Entra, invalidating session`);
+        console.log(`User ${user.email} is BLOCKED in Entra (tenant: ${config.tenant_id}), invalidating session`);
         await invalidateUserSessions(user.id, 'User blocked in Entra ID');
-        continue;
-      }
-
-      // If user not found in this tenant, skip checks (wrong tenant credentials)
-      if (entraStatus && entraStatus.wrongTenant) {
-        console.log(`User ${user.email} not found in tenant ${config?.tenant_id || 'global'}, skipping checks`);
         continue;
       }
 
@@ -576,11 +617,13 @@ async function pollUserStatus() {
         const appAccess = await checkUserAppAccess(user.email, config.security_group_id, token);
 
         if (appAccess && !appAccess.hasAccess) {
-          console.log(`User ${user.email} removed from security group, invalidating session`);
+          console.log(`User ${user.email} removed from security group in tenant ${config.tenant_id}, invalidating session`);
           await invalidateUserSessions(user.id, appAccess.reason || 'User removed from security group');
           continue;
         }
       }
+
+      console.log(`User ${user.email} check passed in tenant ${config.tenant_id}`);
     }
   } catch (error) {
     console.error('Error polling user status:', error);
@@ -759,5 +802,7 @@ module.exports = {
   // Multi-tenant exports
   getTenantGraphToken,
   getGraphTokenForConfig,
+  getGraphTokenForUser,
+  findUserAndGetToken,
   tenantTokenCache
 };
