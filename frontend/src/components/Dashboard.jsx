@@ -237,9 +237,20 @@ const Dashboard = () => {
                   onClick={() => navigate('/saml-config')}
                   className="inline-flex items-center justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
                 >
-                  <svg className="w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  <svg
+                    className="w-4 h-4 mr-2"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M11.983 2.25c.414 0 .75.336.75.75v1.5a7.5 7.5 0 012.61 1.083l1.06-1.06a.75.75 0 011.06 1.06l-1.06 1.06A7.5 7.5 0 0119.5 12h1.5a.75.75 0 010 1.5h-1.5a7.5 7.5 0 01-1.083 2.61l1.06 1.06a.75.75 0 11-1.06 1.06l-1.06-1.06A7.5 7.5 0 0112.75 19.5v1.5a.75.75 0 01-1.5 0v-1.5a7.5 7.5 0 01-2.61-1.083l-1.06 1.06a.75.75 0 11-1.06-1.06l1.06-1.06A7.5 7.5 0 014.5 13.5H3a.75.75 0 010-1.5h1.5a7.5 7.5 0 011.083-2.61l-1.06-1.06a.75.75 0 111.06-1.06l1.06 1.06A7.5 7.5 0 0111.25 4.5V3c0-.414.336-.75.733-.75z"
+                    />
+                    <circle cx="12" cy="12" r="3" strokeWidth={2} />
                   </svg>
                   SAML Setup
                 </button>

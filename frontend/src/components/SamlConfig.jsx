@@ -262,9 +262,9 @@ const SamlConfig = () => {
                 {existingConfigs.map((cfg) => (
                   <div key={cfg.id} className={`border rounded-lg p-4 hover:shadow-md transition-shadow ${cfg.enabled === false ? 'border-gray-200 bg-gray-50' : 'border-gray-200 bg-white'}`}>
                     <div className="flex justify-between items-start mb-3">
-                      <div className="flex items-center gap-3">
-                        <div>
-                          <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <h3 className="font-semibold text-gray-900">{cfg.saml_name}</h3>
                             {cfg.enabled === false ? (
                               <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">
@@ -276,7 +276,7 @@ const SamlConfig = () => {
                               </span>
                             )}
                             {cfg.graph_api_enabled && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 whitespace-nowrap">
                                 Graph API
                               </span>
                             )}
@@ -287,7 +287,7 @@ const SamlConfig = () => {
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-2 flex-wrap">
                         {/* Toggle Switch - Better styled */}
                         <div
                           onClick={(e) => {
