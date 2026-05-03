@@ -530,9 +530,39 @@ async function getGraphTokenForUser(email) {
   }
 }
 
+// Cache for user-tenant mappings to avoid repeated searches: email -> { tenantId, timestamp }
+const userTenantCache = new Map();
+const USER_TENANT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 // Find user across all configured SAML tenants
 async function findUserAndGetToken(email) {
   try {
+    // Check cache first
+    const cached = userTenantCache.get(email.toLowerCase());
+    if (cached && (Date.now() - cached.timestamp) < USER_TENANT_CACHE_TTL) {
+      // Use cached tenant
+      const { rows: configs } = await pool.query(
+        `SELECT id, tenant_id, client_id, client_secret, graph_api_enabled, security_group_id, saml_name
+         FROM saml_configs
+         WHERE tenant_id = $1 AND graph_api_enabled = true`,
+        [cached.tenantId]
+      );
+
+      if (configs.length > 0) {
+        const config = configs[0];
+        const token = await getTenantGraphToken(config.tenant_id, config.client_id, config.client_secret);
+        if (token) {
+          // Verify user still exists in this tenant
+          const userId = await getUserIdByEmail(email, token);
+          if (userId) {
+            return { token, config, userId };
+          }
+        }
+      }
+      // Cache miss or user moved, clear cache and search again
+      userTenantCache.delete(email.toLowerCase());
+    }
+
     // Get all SAML configs with Graph API enabled
     const { rows: configs } = await pool.query(
       `SELECT id, tenant_id, client_id, client_secret, graph_api_enabled, security_group_id, saml_name
@@ -548,7 +578,32 @@ async function findUserAndGetToken(email) {
       return null;
     }
 
-    // Try each config to find the user
+    // Single config optimization: use it directly
+    if (configs.length === 1) {
+      const config = configs[0];
+      try {
+        const token = await getTenantGraphToken(config.tenant_id, config.client_id, config.client_secret);
+        if (!token) {
+          console.log(`Failed to get token for single config ${config.saml_name}`);
+          return null;
+        }
+
+        const userId = await getUserIdByEmail(email, token);
+        if (userId) {
+          console.log(`Found user ${email} in single tenant ${config.tenant_id} (${config.saml_name})`);
+          // Cache the result
+          userTenantCache.set(email.toLowerCase(), { tenantId: config.tenant_id, timestamp: Date.now() });
+          return { token, config, userId };
+        }
+        console.log(`User ${email} not found in single configured tenant ${config.tenant_id}`);
+        return null;
+      } catch (err) {
+        console.error(`Error checking single config:`, err.message);
+        return null;
+      }
+    }
+
+    // Multiple configs: try each to find the user
     for (const config of configs) {
       try {
         const token = await getTenantGraphToken(config.tenant_id, config.client_id, config.client_secret);
@@ -559,6 +614,8 @@ async function findUserAndGetToken(email) {
 
         if (userId) {
           console.log(`Found user ${email} in tenant ${config.tenant_id} (${config.saml_name})`);
+          // Cache the result
+          userTenantCache.set(email.toLowerCase(), { tenantId: config.tenant_id, timestamp: Date.now() });
           return { token, config, userId };
         }
       } catch (err) {
@@ -768,10 +825,35 @@ async function getRecentGroupRemovals(securityGroupId) {
   });
 }
 
+// Check if any Graph API credentials are available (global or SAML configs)
+async function isGraphApiConfigured() {
+  // Check for global credentials
+  if (GRAPH_CLIENT_ID && GRAPH_CLIENT_SECRET && GRAPH_TENANT_ID) {
+    return true;
+  }
+
+  // Check for SAML config credentials
+  try {
+    const { rows: configs } = await pool.query(
+      `SELECT id FROM saml_configs
+       WHERE graph_api_enabled = true
+       AND tenant_id IS NOT NULL
+       AND client_id IS NOT NULL
+       AND client_secret IS NOT NULL
+       LIMIT 1`
+    );
+    return configs.length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
 // Start polling (every 2 minutes for status, every 30 seconds for audit logs)
-function startUserStatusPolling() {
-  if (!GRAPH_CLIENT_ID || !GRAPH_CLIENT_SECRET || !GRAPH_TENANT_ID) {
-    console.log('Graph API not configured. Set GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET, GRAPH_TENANT_ID env vars');
+async function startUserStatusPolling() {
+  const hasGraphConfig = await isGraphApiConfigured();
+
+  if (!hasGraphConfig) {
+    console.log('Graph API not configured. Set GRAPH_CLIENT_ID/SECRET/TENANT_ID env vars OR configure SAML with Graph API credentials');
     return;
   }
 

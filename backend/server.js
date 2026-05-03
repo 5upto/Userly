@@ -75,10 +75,10 @@ const startServer = async () => {
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Health check available at http://localhost:${PORT}/api/health`);
-
-      // Start Microsoft Graph API polling for Entra user status
-      startUserStatusPolling();
     });
+
+    // Start Microsoft Graph API polling for Entra user status (outside listener callback)
+    await startUserStatusPolling();
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
