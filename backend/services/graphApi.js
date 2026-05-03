@@ -697,9 +697,9 @@ async function invalidateUserSessions(userId, reason) {
       [userId]
     );
 
-    // Blacklist all tokens
+    // Blacklist all tokens with the reason
     for (const session of sessions) {
-      blacklistToken(session.token);
+      blacklistToken(session.token, reason);
     }
 
     // Mark sessions as inactive in DB

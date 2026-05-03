@@ -11,10 +11,16 @@ const authenticateToken = async (req, res, next) => {
     return res.status(401).json({ message: 'Access token required', redirect: true });
   }
 
-  // Check if token was invalidated by IdP-initiated SLO
-  if (isTokenBlacklisted(token)) {
-    console.log('Rejected blacklisted token');
-    return res.status(401).json({ message: 'Session invalidated by IdP logout', redirect: true });
+  // Check if token was invalidated by IdP-initiated SLO or block
+  const blacklistCheck = isTokenBlacklisted(token);
+  if (blacklistCheck.blacklisted) {
+    console.log('Rejected blacklisted token, reason:', blacklistCheck.reason);
+    const reason = blacklistCheck.reason || 'blocked';
+    return res.status(401).json({
+      message: blacklistCheck.reason || 'Session invalidated',
+      redirect: true,
+      reason: reason.toLowerCase().includes('security') ? 'security_group' : 'blocked'
+    });
   }
 
   try {
@@ -86,8 +92,8 @@ const authenticateToken = async (req, res, next) => {
           if (entraStatus && entraStatus.blocked) {
             console.log(`Real-time block detected for ${user.email} in Entra`);
 
-            // Blacklist current token
-            blacklistToken(token);
+            // Blacklist current token with reason
+            blacklistToken(token, 'User blocked in Entra ID');
 
             // Update local user status
             await pool.query('UPDATE users SET status = $1 WHERE id = $2', ['blocked', user.id]);
@@ -106,8 +112,8 @@ const authenticateToken = async (req, res, next) => {
             if (membership && !membership.isMember) {
               console.log(`Real-time: User ${user.email} not in security group ${securityGroupId}`);
 
-              // Blacklist current token
-              blacklistToken(token);
+              // Blacklist current token with reason
+              blacklistToken(token, 'User removed from security group');
 
               // Update local user status
               await pool.query('UPDATE users SET status = $1 WHERE id = $2', ['blocked', user.id]);

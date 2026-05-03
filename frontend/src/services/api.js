@@ -21,8 +21,8 @@ api.interceptors.response.use(
     const redirect = error.response?.data?.redirect;
     const reason = error.response?.data?.reason;
 
-    // Handle Entra block or security group removal
-    if (status === 403 && (reason === 'blocked' || reason === 'security_group')) {
+    // Handle Entra block or security group removal (check first before generic redirect)
+    if (status === 403 && redirect && (reason === 'blocked' || reason === 'security_group')) {
       // Determine the appropriate message based on reason from backend
       const toastMessage = reason === 'security_group'
         ? 'Your access has been revoked.'
