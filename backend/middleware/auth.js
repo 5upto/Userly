@@ -31,7 +31,24 @@ const authenticateToken = async (req, res, next) => {
 
     const user = users[0];
     if (user.status === 'blocked') {
-      return res.status(403).json({ message: 'Account blocked', redirect: true });
+      // Get the specific reason from the most recent invalidated session
+      const { rows: sessionRows } = await pool.query(
+        `SELECT invalidated_reason FROM user_sessions
+         WHERE user_id = $1 AND auth_type = 'saml' AND invalidated_reason IS NOT NULL
+         ORDER BY invalidated_at DESC NULLS LAST
+         LIMIT 1`,
+        [user.id]
+      );
+
+      const reason = sessionRows[0]?.invalidated_reason || 'Account blocked';
+      const isSecurityGroup = reason.toLowerCase().includes('security group') ||
+                              reason.toLowerCase().includes('removed from');
+
+      return res.status(403).json({
+        message: reason,
+        redirect: true,
+        reason: isSecurityGroup ? 'security_group' : 'blocked'
+      });
     }
 
     // For SAML users, optionally check real-time status in Entra (if Graph API configured)
