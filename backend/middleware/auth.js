@@ -21,7 +21,7 @@ const authenticateToken = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key');
     
     const { rows: users } = await pool.query(
-      'SELECT id, email, name, status, role, entra_id FROM users WHERE id = $1',
+      'SELECT id, email, name, status, role FROM users WHERE id = $1',
       [decoded.userId]
     );
 
@@ -46,13 +46,8 @@ const authenticateToken = async (req, res, next) => {
           if (!graphToken) {
             console.log(`Failed to get Graph token for ${user.email}'s tenant, skipping real-time check`);
           } else {
-            // Use Entra ID if available, otherwise fall back to email
-            const userLookupId = creds.userEntraId || user.entra_id || user.email;
-            console.log(`Checking Entra status for user using: ${creds.userEntraId ? 'Entra ID' : user.entra_id ? 'stored Entra ID' : 'email'}`);
-
             // Check 1: Is user blocked in Entra?
-            const entraStatus = await checkUserStatusInEntra(userLookupId, graphToken);
-
+            const entraStatus = await checkUserStatusInEntra(user.email, graphToken);
             if (entraStatus && entraStatus.blocked) {
               console.log(`Real-time block detected for ${user.email} in Entra`);
 
@@ -71,7 +66,7 @@ const authenticateToken = async (req, res, next) => {
 
             // Check 2: Real-time check - is user still in their tenant's security group?
             if (creds.securityGroupId) {
-              const membership = await checkUserGroupMembership(userLookupId, creds.securityGroupId, graphToken);
+              const membership = await checkUserGroupMembership(user.email, creds.securityGroupId, graphToken);
               if (membership && !membership.isMember) {
                 console.log(`Real-time: User ${user.email} not in security group ${creds.securityGroupId}`);
 
