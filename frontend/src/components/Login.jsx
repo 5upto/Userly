@@ -206,7 +206,7 @@ const Login = () => {
               <div className="flex items-center justify-center min-h-screen px-4">
                 {/* Backdrop */}
                 <div
-                  className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"
+                  className="fixed inset-0 bg-gray-900/30 backdrop-blur-sm transition-opacity"
                   onClick={() => setShowProviderModal(false)}
                 ></div>
 
