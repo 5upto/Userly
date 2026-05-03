@@ -149,7 +149,7 @@ const Login = () => {
           </div>
 
           {/* SAML SSO Section */}
-          {samlProviders.length > 0 && !loadingProviders && (
+          {samlProviders.length > 0 && (
             <div className="mt-6">
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
