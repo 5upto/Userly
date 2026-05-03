@@ -728,13 +728,20 @@ async function handleSamlUser(profile, res, samlConfig) {
   try {
     const email = profile.nameID || profile.email;
     const name = profile.displayName || profile.name || email.split('@')[0];
+    
+    // Extract Entra object ID from SAML profile (for federated tenant support)
+    // Azure AD/Entra ID sends this as http://schemas.microsoft.com/identity/claims/objectidentifier
+    const entraObjectId = profile['http://schemas.microsoft.com/identity/claims/objectidentifier'] || 
+                          profile.oid || 
+                          profile.objectidentifier ||
+                          null;
 
-    console.log('Extracted user info - email:', email, 'name:', name);
+    console.log('Extracted user info - email:', email, 'name:', name, 'entraObjectId:', entraObjectId);
     console.log('Using SAML config:', samlConfig ? { id: samlConfig.id, name: samlConfig.saml_name, tenant_id: samlConfig.tenant_id } : 'none');
 
     // Check if user exists
     const { rows: existingUsers } = await pool.query(
-      'SELECT id, email, name, status, role FROM users WHERE email = $1',
+      'SELECT id, email, name, status, role, entra_id FROM users WHERE email = $1',
       [email]
     );
 
@@ -742,26 +749,37 @@ async function handleSamlUser(profile, res, samlConfig) {
 
     let user;
     if (existingUsers.length === 0) {
-      // Create new user
+      // Create new user with entra_id if available
       console.log('Creating new user...');
       const { rows: newUsers } = await pool.query(
-        'INSERT INTO users (name, email, password, role, created_at, last_login_time) VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING id, email, name, status, role',
-        [name, email, '', 'standard'] // Empty password for SAML users, default role
+        'INSERT INTO users (name, email, password, role, created_at, last_login_time, entra_id) VALUES ($1, $2, $3, $4, NOW(), NOW(), $5) RETURNING id, email, name, status, role, entra_id',
+        [name, email, '', 'standard', entraObjectId]
       );
       user = newUsers[0];
-      console.log('User created successfully:', user.id);
+      console.log('User created successfully:', user.id, 'entra_id:', user.entra_id);
     } else {
-      // Update existing user's last login time
+      // Update existing user's last login time and entra_id if not set
       user = existingUsers[0];
-      console.log('Existing user found:', user.id, 'status:', user.status);
+      console.log('Existing user found:', user.id, 'status:', user.status, 'entra_id:', user.entra_id);
       if (user.status === 'blocked') {
         console.error('Account is blocked');
         return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=account_locked');
       }
-      await pool.query(
-        'UPDATE users SET last_login_time = NOW() WHERE id = $1',
-        [user.id]
-      );
+      
+      // Update entra_id if we have it and it's not set yet
+      if (entraObjectId && !user.entra_id) {
+        await pool.query(
+          'UPDATE users SET last_login_time = NOW(), entra_id = $1 WHERE id = $2',
+          [entraObjectId, user.id]
+        );
+        user.entra_id = entraObjectId;
+        console.log('Updated user entra_id:', entraObjectId);
+      } else {
+        await pool.query(
+          'UPDATE users SET last_login_time = NOW() WHERE id = $1',
+          [user.id]
+        );
+      }
     }
 
     // Store tenant-specific Graph API credentials in the token for per-tenant Graph API access
@@ -770,7 +788,8 @@ async function handleSamlUser(profile, res, samlConfig) {
       clientId: samlConfig.client_id,
       clientSecret: samlConfig.client_secret,
       graphApiEnabled: samlConfig.graph_api_enabled,
-      securityGroupId: samlConfig.security_group_id
+      securityGroupId: samlConfig.security_group_id,
+      userEntraId: user.entra_id  // Include user's Entra ID for Graph API lookups
     } : null;
 
     // Generate short-lived JWT token (15 min) for SAML users

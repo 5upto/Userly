@@ -479,7 +479,7 @@ async function pollUserStatus() {
   try {
     // Get all active SAML users from our database
     const { rows: activeUsers } = await pool.query(
-      `SELECT DISTINCT u.id, u.email, u.status
+      `SELECT DISTINCT u.id, u.email, u.status, u.entra_id
        FROM users u
        JOIN user_sessions us ON u.id = us.user_id
        WHERE us.auth_type = 'saml'
@@ -500,8 +500,18 @@ async function pollUserStatus() {
         continue;
       }
 
+      // Use entra_id if available, otherwise fall back to email
+      const userLookupId = user.entra_id || user.email;
+      console.log(`Polling user ${user.email} using ${user.entra_id ? 'Entra ID' : 'email'}`);
+
       // Check 1: Is user blocked/disabled in Entra?
-      const entraStatus = await checkUserStatusInEntra(user.email, token);
+      const entraStatus = await checkUserStatusInEntra(userLookupId, token);
+
+      // If user not found in this tenant (federated/external user), skip all checks
+      if (entraStatus && entraStatus.wrongTenant) {
+        console.log(`User ${user.email} is federated/external (not in tenant ${config?.tenant_id || 'global'}), skipping Entra checks`);
+        continue;
+      }
 
       if (entraStatus && entraStatus.blocked) {
         console.log(`User ${user.email} is BLOCKED in Entra, invalidating session`);
@@ -509,15 +519,9 @@ async function pollUserStatus() {
         continue;
       }
 
-      // If user not found in this tenant, skip checks (wrong tenant credentials)
-      if (entraStatus && entraStatus.wrongTenant) {
-        console.log(`User ${user.email} not found in tenant ${config?.tenant_id || 'global'}, skipping checks`);
-        continue;
-      }
-
       // Check 2: Does user still have app access (security group membership)?
       if (config?.security_group_id) {
-        const appAccess = await checkUserAppAccess(user.email, config.security_group_id, token);
+        const appAccess = await checkUserAppAccess(userLookupId, config.security_group_id, token);
 
         if (appAccess && !appAccess.hasAccess) {
           console.log(`User ${user.email} removed from security group, invalidating session`);
