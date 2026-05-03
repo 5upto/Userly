@@ -48,7 +48,11 @@ const authenticateToken = async (req, res, next) => {
           } else {
             // Check 1: Is user blocked in Entra?
             const entraStatus = await checkUserStatusInEntra(user.email, graphToken);
-            if (entraStatus && entraStatus.blocked) {
+
+            // If user not found in this tenant (external/federated user), skip all Graph API checks
+            if (entraStatus && entraStatus.wrongTenant) {
+              console.log(`User ${user.email} not found in tenant (external/federated), skipping Graph API checks`);
+            } else if (entraStatus && entraStatus.blocked) {
               console.log(`Real-time block detected for ${user.email} in Entra`);
 
               // Blacklist current token
@@ -65,7 +69,8 @@ const authenticateToken = async (req, res, next) => {
             }
 
             // Check 2: Real-time check - is user still in their tenant's security group?
-            if (creds.securityGroupId) {
+            // Only check if user exists in this tenant (skip for external users)
+            if (creds.securityGroupId && !(entraStatus && entraStatus.wrongTenant)) {
               const membership = await checkUserGroupMembership(user.email, creds.securityGroupId, graphToken);
               if (membership && !membership.isMember) {
                 console.log(`Real-time: User ${user.email} not in security group ${creds.securityGroupId}`);

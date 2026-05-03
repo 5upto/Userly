@@ -149,10 +149,19 @@ async function checkUserStatusInEntra(email, token) {
   }
   if (!token) return null;
 
+  // First, find the user by email (handles external/guest users with #EXT# UPNs)
+  const userId = await getUserIdByEmail(email, token);
+
+  if (!userId) {
+    console.log(`User ${email} not found in this Entra tenant (external user or wrong tenant)`);
+    return { exists: false, blocked: false, wrongTenant: true };
+  }
+
+  // Now get the user's account status using their ID
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'graph.microsoft.com',
-      path: `/v1.0/users/${encodeURIComponent(email)}?$select=accountEnabled`,
+      path: `/v1.0/users/${encodeURIComponent(userId)}?$select=accountEnabled`,
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -165,17 +174,14 @@ async function checkUserStatusInEntra(email, token) {
       res.on('data', (chunk) => data += chunk);
       res.on('end', () => {
         try {
-          if (res.statusCode === 404) {
-            // User not found in this tenant - could be wrong tenant credentials
-            // Don't auto-block, just return null to skip this check
-            console.log(`User ${email} not found in this Entra tenant (wrong tenant credentials?)`);
-            resolve({ exists: false, blocked: false, wrongTenant: true });
-          } else if (res.statusCode === 200) {
+          if (res.statusCode === 200) {
             const user = JSON.parse(data);
             resolve({
               exists: true,
               blocked: !user.accountEnabled
             });
+          } else if (res.statusCode === 404) {
+            resolve({ exists: false, blocked: false, wrongTenant: true });
           } else {
             console.error(`Graph API error: ${res.statusCode}`, data);
             resolve(null);
@@ -340,10 +346,18 @@ async function checkUserAppAccess(email, securityGroupId, token) {
 }
 
 async function getUserIdByEmail(email, accessToken) {
+  // Try multiple search methods to find external/guest users
+  // Method 1: Search by mail attribute (original email)
+  // Method 2: Search by otherMails (alternate emails)
+  // Method 3: Try direct UPN (for internal users)
+
   return new Promise((resolve) => {
+    // Use $filter to search by mail or otherMails - this works for external users
+    // whose UPN is transformed (e.g., user_domain.com#EXT#@tenant.onmicrosoft.com)
+    const filter = `mail eq '${email}' or otherMails/any(x:x eq '${email}')`;
     const options = {
       hostname: 'graph.microsoft.com',
-      path: `/v1.0/users/${encodeURIComponent(email)}?$select=id`,
+      path: `/v1.0/users?$filter=${encodeURIComponent(filter)}&$select=id,userPrincipalName,mail`,
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -357,19 +371,61 @@ async function getUserIdByEmail(email, accessToken) {
       res.on('end', () => {
         try {
           if (res.statusCode === 200) {
-            const user = JSON.parse(data);
-            resolve(user.id);
+            const response = JSON.parse(data);
+            if (response.value && response.value.length > 0) {
+              const user = response.value[0];
+              console.log(`Found user ${email} in Entra: ${user.id} (UPN: ${user.userPrincipalName})`);
+              resolve(user.id);
+            } else {
+              // No user found with mail/otherMails filter, try direct UPN lookup as fallback
+              tryDirectUpnLookup();
+            }
           } else {
-            resolve(null);
+            tryDirectUpnLookup();
           }
         } catch (e) {
-          resolve(null);
+          tryDirectUpnLookup();
         }
       });
     });
 
-    req.on('error', () => resolve(null));
+    req.on('error', () => tryDirectUpnLookup());
     req.end();
+
+    // Fallback: try direct UPN lookup (for internal users)
+    function tryDirectUpnLookup() {
+      const directOptions = {
+        hostname: 'graph.microsoft.com',
+        path: `/v1.0/users/${encodeURIComponent(email)}?$select=id`,
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json'
+        }
+      };
+
+      const directReq = https.request(directOptions, (res) => {
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => {
+          try {
+            if (res.statusCode === 200) {
+              const user = JSON.parse(data);
+              console.log(`Found user ${email} via direct UPN: ${user.id}`);
+              resolve(user.id);
+            } else {
+              console.log(`User ${email} not found in Entra tenant`);
+              resolve(null);
+            }
+          } catch (e) {
+            resolve(null);
+          }
+        });
+      });
+
+      directReq.on('error', () => resolve(null));
+      directReq.end();
+    }
   });
 }
 
