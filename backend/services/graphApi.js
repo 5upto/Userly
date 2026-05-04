@@ -211,10 +211,12 @@ async function checkUserGroupMembership(email, securityGroupId, token) {
   const userId = await getUserIdByEmail(email, token);
   if (!userId) return { isMember: false, reason: 'User not found' };
 
+  // Use the transitiveMembers endpoint to check membership directly
+  // This is more efficient and handles large groups correctly
   return new Promise((resolve) => {
     const options = {
       hostname: 'graph.microsoft.com',
-      path: `/v1.0/groups/${encodeURIComponent(securityGroupId)}/members?$select=id&$top=500`,
+      path: `/v1.0/groups/${encodeURIComponent(securityGroupId)}/members/${encodeURIComponent(userId)}/$ref`,
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -227,17 +229,12 @@ async function checkUserGroupMembership(email, securityGroupId, token) {
       res.on('data', (chunk) => data += chunk);
       res.on('end', () => {
         try {
-          if (res.statusCode === 200) {
-            const response = JSON.parse(data);
-            const members = response.value || [];
-            const isMember = members.some(m => m.id === userId);
-
-            resolve({
-              isMember: isMember,
-              reason: isMember ? null : 'User not in security group'
-            });
+          if (res.statusCode === 204) {
+            // 204 No Content means user IS a member
+            resolve({ isMember: true, reason: null });
           } else if (res.statusCode === 404) {
-            resolve({ isMember: false, reason: 'Group not found' });
+            // 404 Not Found means user is NOT a member
+            resolve({ isMember: false, reason: 'User not in security group' });
           } else {
             console.error(`Group membership check error: ${res.statusCode}`, data);
             resolve({ isMember: true }); // Assume access on error
