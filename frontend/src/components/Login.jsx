@@ -12,8 +12,10 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [blockedMessage, setBlockedMessage] = useState('');
   const [samlProviders, setSamlProviders] = useState([]);
+  const [oidcProviders, setOidcProviders] = useState([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
   const [showProviderModal, setShowProviderModal] = useState(false);
+  const [showOidcModal, setShowOidcModal] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -49,6 +51,22 @@ const Login = () => {
     fetchSamlProviders();
   }, []);
 
+  // Fetch enabled OIDC providers
+  useEffect(() => {
+    const fetchOidcProviders = async () => {
+      try {
+        const response = await api.get('/oidc/configs');
+        const enabledProviders = response.data?.filter(p => p.enabled !== false) || [];
+        setOidcProviders(enabledProviders);
+      } catch (error) {
+        console.error('Failed to fetch OIDC providers:', error);
+        setOidcProviders([]);
+      }
+    };
+
+    fetchOidcProviders();
+  }, []);
+
   const handleChange = (e) => {
     setFormData({
       ...formData,
@@ -70,6 +88,20 @@ const Login = () => {
     }
     
     setLoading(false);
+  };
+
+  const handleOidcLogin = async (configId) => {
+    try {
+      const response = await api.get(`/oidc/login/${configId}`);
+      if (response.data.authorizationUrl) {
+        window.location.href = response.data.authorizationUrl;
+      } else {
+        toast.error('Failed to initiate OIDC login');
+      }
+    } catch (error) {
+      console.error('OIDC login error:', error);
+      toast.error(error.response?.data?.message || 'Failed to initiate OIDC login');
+    }
   };
 
   return (
@@ -200,6 +232,50 @@ const Login = () => {
             </div>
           </div>
 
+          {/* OIDC SSO Section */}
+          {oidcProviders.length > 0 && (
+            <div className="mt-4">
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-300"></div>
+                </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="px-2 bg-gray-50 text-gray-500">Or continue with</span>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                {oidcProviders.length === 1 ? (
+                  // Single provider: direct login
+                  <button
+                    type="button"
+                    onClick={() => handleOidcLogin(oidcProviders[0].id)}
+                    className="w-full flex justify-center items-center py-3 px-4 border border-blue-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200"
+                  >
+                    <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    {oidcProviders[0].oidc_name}
+                  </button>
+                ) : (
+                  // Multiple providers: show selection modal
+                  <button
+                    type="button"
+                    onClick={() => setShowOidcModal(true)}
+                    className="w-full flex justify-center items-center py-3 px-4 border border-blue-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200"
+                  >
+                    <svg className="w-5 h-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    OpenID Connect
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* SAML Provider Selection Modal */}
           {showProviderModal && (
             <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
@@ -260,6 +336,68 @@ const Login = () => {
                     <button
                       type="button"
                       onClick={() => setShowProviderModal(false)}
+                      className="w-full px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* OIDC Provider Selection Modal */}
+          {showOidcModal && (
+            <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+              <div className="flex items-center justify-center min-h-screen px-4">
+                {/* Backdrop */}
+                <div
+                  className="fixed inset-0 bg-gray-900/30 backdrop-blur-sm transition-opacity"
+                  onClick={() => setShowOidcModal(false)}
+                ></div>
+
+                {/* Modal panel */}
+                <div className="relative bg-white rounded-lg max-w-md w-full p-6 shadow-xl">
+                  <div className="text-center">
+                    <h3 className="text-lg font-medium text-gray-900 mb-2" id="modal-title">
+                      Choose your identity provider
+                    </h3>
+                    <p className="text-sm text-gray-500 mb-6">
+                      Select your identity provider to continue with OpenID Connect
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    {oidcProviders.map((provider) => (
+                      <button
+                        key={provider.id}
+                        type="button"
+                        onClick={() => handleOidcLogin(provider.id)}
+                        className="w-full flex items-center justify-between p-4 border border-gray-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                      >
+                        <div className="flex items-center">
+                          <div className="flex-shrink-0 h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center">
+                            <svg className="h-6 w-6 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                          </div>
+                          <div className="ml-4 text-left">
+                            <p className="text-sm font-medium text-gray-900">{provider.oidc_name}</p>
+                            <p className="text-xs text-gray-500">{provider.allowed_domains}</p>
+                          </div>
+                        </div>
+                        <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-6">
+                    <button
+                      type="button"
+                      onClick={() => setShowOidcModal(false)}
                       className="w-full px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
                     >
                       Cancel

@@ -53,6 +53,47 @@ const AuthCallback = () => {
   return <div>Processing authentication...</div>;
 };
 
+const OidcCallback = () => {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const token = searchParams.get('token');
+    if (token) {
+      localStorage.setItem('token', token);
+      
+      // Decode JWT to get user info
+      try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        const payload = JSON.parse(jsonPayload);
+        
+        // Store user info from token
+        const user = {
+          id: payload.userId,
+          email: payload.email,
+          name: payload.name,
+          role: payload.role || 'standard'
+        };
+        localStorage.setItem('user', JSON.stringify(user));
+        console.log('User stored from OIDC token:', user);
+      } catch (e) {
+        console.error('Failed to decode OIDC token:', e);
+      }
+      
+      // Use window.location to force page reload so AuthContext reads the token
+      window.location.href = '/dashboard';
+    } else {
+      navigate('/login');
+    }
+  }, [searchParams, navigate]);
+
+  return <div>Processing OIDC authentication...</div>;
+};
+
 function App() {
   return (
     <AuthProvider>
@@ -62,6 +103,7 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/oidc-callback" element={<OidcCallback />} />
             <Route 
               path="/dashboard" 
               element={
