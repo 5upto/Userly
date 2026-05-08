@@ -209,13 +209,13 @@ const Login = () => {
                     }}
                     className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
                   >
-                    <svg className="w-5 h-5 mr-2" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M4.5 4.5H9.5V9.5H4.5V4.5Z" fill="#F25022"/>
-                      <path d="M11.5 4.5H16.5V9.5H11.5V4.5Z" fill="#7FBA00"/>
-                      <path d="M4.5 11.5H9.5V16.5H4.5V11.5Z" fill="#00A4EF"/>
-                      <path d="M11.5 11.5H16.5V16.5H11.5V11.5Z" fill="#FFB900"/>
+                    <svg className="w-5 h-5 mr-2" viewBox="0 0 23 23" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M0 0H10.4375V10.4375H0V0Z" fill="#F25022"/>
+                      <path d="M11.5625 0H22V10.4375H11.5625V0Z" fill="#7FBA00"/>
+                      <path d="M0 11.5625H10.4375V22H0V11.5625Z" fill="#00A4EF"/>
+                      <path d="M11.5625 11.5625H22V22H11.5625V11.5625Z" fill="#FFB900"/>
                     </svg>
-                    Sign in with Microsoft
+                    Sign in with Entra SAML
                   </button>
                 ) : (
                   // Multiple providers: show selection modal
@@ -224,11 +224,11 @@ const Login = () => {
                     onClick={() => setShowProviderModal(true)}
                     className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
                   >
-                    <svg className="w-5 h-5 mr-2" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M4.5 4.5H9.5V9.5H4.5V4.5Z" fill="#F25022"/>
-                      <path d="M11.5 4.5H16.5V9.5H11.5V4.5Z" fill="#7FBA00"/>
-                      <path d="M4.5 11.5H9.5V16.5H4.5V11.5Z" fill="#00A4EF"/>
-                      <path d="M11.5 11.5H16.5V16.5H11.5V11.5Z" fill="#FFB900"/>
+                    <svg className="w-5 h-5 mr-2" viewBox="0 0 23 23" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M0 0H10.4375V10.4375H0V0Z" fill="#F25022"/>
+                      <path d="M11.5625 0H22V10.4375H11.5625V0Z" fill="#7FBA00"/>
+                      <path d="M0 11.5625H10.4375V22H0V11.5625Z" fill="#00A4EF"/>
+                      <path d="M11.5625 11.5625H22V22H11.5625V11.5625Z" fill="#FFB900"/>
                     </svg>
                     SAML SSO
                   </button>
@@ -247,13 +247,13 @@ const Login = () => {
                   onClick={() => handleOidcLogin(oidcProviders[0].id)}
                   className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
                 >
-                  <svg className="w-5 h-5 mr-2" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M4.5 4.5H9.5V9.5H4.5V4.5Z" fill="#F25022"/>
-                    <path d="M11.5 4.5H16.5V9.5H11.5V4.5Z" fill="#7FBA00"/>
-                    <path d="M4.5 11.5H9.5V16.5H4.5V11.5Z" fill="#00A4EF"/>
-                    <path d="M11.5 11.5H16.5V16.5H11.5V11.5Z" fill="#FFB900"/>
+                  <svg className="w-5 h-5 mr-2" viewBox="0 0 23 23" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M0 0H10.4375V10.4375H0V0Z" fill="#F25022"/>
+                    <path d="M11.5625 0H22V10.4375H11.5625V0Z" fill="#7FBA00"/>
+                    <path d="M0 11.5625H10.4375V22H0V11.5625Z" fill="#00A4EF"/>
+                    <path d="M11.5625 11.5625H22V22H11.5625V11.5625Z" fill="#FFB900"/>
                   </svg>
-                  Sign in with {oidcProviders[0].oidc_name}
+                  Sign in with Entra OIDC
                 </button>
               ) : (
                 // Multiple providers: show selection modal
@@ -262,11 +262,11 @@ const Login = () => {
                   onClick={() => setShowOidcModal(true)}
                   className="w-full flex justify-center items-center py-3 px-4 border border-gray-300 text-base font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors duration-200"
                 >
-                  <svg className="w-5 h-5 mr-2" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M4.5 4.5H9.5V9.5H4.5V4.5Z" fill="#F25022"/>
-                    <path d="M11.5 4.5H16.5V9.5H11.5V4.5Z" fill="#7FBA00"/>
-                    <path d="M4.5 11.5H9.5V16.5H4.5V11.5Z" fill="#00A4EF"/>
-                    <path d="M11.5 11.5H16.5V16.5H11.5V11.5Z" fill="#FFB900"/>
+                  <svg className="w-5 h-5 mr-2" viewBox="0 0 23 23" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M0 0H10.4375V10.4375H0V0Z" fill="#F25022"/>
+                    <path d="M11.5625 0H22V10.4375H11.5625V0Z" fill="#7FBA00"/>
+                    <path d="M0 11.5625H10.4375V22H0V11.5625Z" fill="#00A4EF"/>
+                    <path d="M11.5625 11.5625H22V22H11.5625V11.5625Z" fill="#FFB900"/>
                   </svg>
                   OpenID Connect
                 </button>
