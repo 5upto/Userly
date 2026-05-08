@@ -394,6 +394,8 @@ router.get('/callback', async (req, res) => {
     const { code, state } = req.query;
     const configId = state; // Read configId from state parameter
 
+    console.log('OIDC callback received:', { hasCode: !!code, state });
+
     if (!code) {
       return res.status(400).json({ message: 'Authorization code is required' });
     }
@@ -405,23 +407,34 @@ router.get('/callback', async (req, res) => {
     const config = getOidcConfigById(configId);
     
     if (!config) {
+      console.error('OIDC config not found for configId:', configId);
       return res.status(404).json({ message: 'OIDC configuration not found' });
     }
+
+    console.log('OIDC config found:', config.oidc_name);
 
     const validation = await validateOidcConfig(config);
     
     if (!validation.valid) {
+      console.error('OIDC validation failed:', validation.error);
       return res.status(400).json({ message: 'Invalid OIDC configuration', error: validation.error });
     }
 
     // Exchange code for tokens
-    const tokens = await exchangeCodeForToken(code, config, validation.discovery);
+    const backendUrl = process.env.BACKEND_URL || 'https://userly-341i.onrender.com';
+    const callbackUrl = `${backendUrl}/api/oidc/callback`;
+    console.log('Exchanging code for tokens...');
+    const tokens = await exchangeCodeForToken(code, config, validation.discovery, callbackUrl);
+    console.log('Tokens received:', { hasAccessToken: !!tokens.access_token, hasIdToken: !!tokens.id_token });
     
     // Get user info
+    console.log('Fetching user info from:', validation.discovery.userinfo_endpoint);
     const userInfo = await getUserInfo(tokens.access_token, validation.discovery.userinfo_endpoint);
+    console.log('User info received:', userInfo);
     
     const email = userInfo.email || userInfo.emails?.[0]?.value;
     if (!email) {
+      console.error('No email in user info:', userInfo);
       return res.status(400).json({ message: 'No email in user info' });
     }
 
@@ -479,10 +492,12 @@ router.get('/callback', async (req, res) => {
 
     // Redirect to frontend with token
     const frontendUrl = process.env.FRONTEND_URL || 'https://userly-pro.vercel.app';
+    console.log('Redirecting to frontend with token');
     res.redirect(`${frontendUrl}/oidc-callback?token=${token}`);
   } catch (error) {
-    console.error('Error in OIDC callback:', error);
-    res.status(500).json({ message: 'Authentication failed' });
+    console.error('Error in OIDC callback:', error.message);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ message: 'Authentication failed', error: error.message });
   }
 });
 

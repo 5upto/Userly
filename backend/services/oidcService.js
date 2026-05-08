@@ -203,12 +203,13 @@ async function getUserInfo(accessToken, userinfoEndpoint) {
 }
 
 // Exchange authorization code for tokens
-async function exchangeCodeForToken(code, config, discovery) {
+async function exchangeCodeForToken(code, config, discovery, redirectUri) {
   return new Promise((resolve, reject) => {
+    console.log('Exchanging code for token with redirect_uri:', redirectUri || config.callback_url);
     const postData = new URLSearchParams({
       grant_type: 'authorization_code',
       code: code,
-      redirect_uri: config.callback_url,
+      redirect_uri: redirectUri || config.callback_url,
       client_id: config.client_id,
       client_secret: config.client_secret
     }).toString();
