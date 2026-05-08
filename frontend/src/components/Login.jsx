@@ -55,9 +55,8 @@ const Login = () => {
   useEffect(() => {
     const fetchOidcProviders = async () => {
       try {
-        const response = await api.get('/oidc/configs');
-        const enabledProviders = response.data?.filter(p => p.enabled !== false) || [];
-        setOidcProviders(enabledProviders);
+        const response = await api.get('/oidc/providers');
+        setOidcProviders(response.data || []);
       } catch (error) {
         console.error('Failed to fetch OIDC providers:', error);
         setOidcProviders([]);

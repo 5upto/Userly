@@ -114,6 +114,23 @@ async function registerOidcStrategies() {
 // Register strategies on startup
 registerOidcStrategies();
 
+// Get OIDC providers for login page (public, no auth required)
+// Only returns ENABLED configurations without sensitive data
+router.get('/providers', (req, res) => {
+  // Return only enabled configurations for login page
+  const providers = getAllOidcConfigs()
+    .filter(c => c.enabled !== false)
+    .map(c => ({
+      id: c.id,
+      oidc_name: c.oidc_name,
+      allowed_domains: c.allowed_domains,
+      issuer_url: c.issuer_url,
+      callback_url: c.callback_url,
+      scope: c.scope
+    }));
+  res.json(providers);
+});
+
 // CRUD Operations for OIDC Configurations
 
 // Get all OIDC configurations (admin only)
