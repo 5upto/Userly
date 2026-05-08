@@ -9,6 +9,7 @@ import Login from './components/Login';
 import Register from './components/Register';
 import Dashboard from './components/Dashboard';
 import SamlConfig from './components/SamlConfig';
+import OidcConfig from './components/OidcConfig';
 
 const AuthCallback = () => {
   const [searchParams] = useSearchParams();
@@ -74,6 +75,14 @@ function App() {
               element={
                 <ProtectedRoute>
                   <SamlConfig />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/oidc-config" 
+              element={
+                <ProtectedRoute>
+                  <OidcConfig />
                 </ProtectedRoute>
               } 
             />
