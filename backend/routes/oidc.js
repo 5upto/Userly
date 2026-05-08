@@ -470,7 +470,7 @@ router.get('/callback/:configId', async (req, res) => {
     );
 
     // Redirect to frontend with token
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://userly-pro.vercel.app';
     res.redirect(`${frontendUrl}/oidc-callback?token=${token}`);
   } catch (error) {
     console.error('Error in OIDC callback:', error);
