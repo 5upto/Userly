@@ -370,12 +370,16 @@ router.get('/login/:configId', async (req, res) => {
     }
 
     // Generate authorization URL
+    // Use a fixed backend callback URL and pass configId in state
+    const backendUrl = process.env.BACKEND_URL || 'https://userly-341i.onrender.com';
+    const callbackUrl = `${backendUrl}/api/oidc/callback`;
+    
     const authUrl = new URL(validation.discovery.authorization_endpoint);
     authUrl.searchParams.append('response_type', config.response_type || 'code');
     authUrl.searchParams.append('client_id', config.client_id);
-    authUrl.searchParams.append('redirect_uri', config.callback_url);
+    authUrl.searchParams.append('redirect_uri', callbackUrl);
     authUrl.searchParams.append('scope', config.scope || 'openid profile email');
-    authUrl.searchParams.append('state', req.params.configId); // Use config ID as state
+    authUrl.searchParams.append('state', req.params.configId); // Pass config ID in state
 
     res.json({ authorizationUrl: authUrl.toString() });
   } catch (error) {
@@ -385,13 +389,17 @@ router.get('/login/:configId', async (req, res) => {
 });
 
 // OIDC callback handler
-router.get('/callback/:configId', async (req, res) => {
+router.get('/callback', async (req, res) => {
   try {
     const { code, state } = req.query;
-    const configId = req.params.configId;
+    const configId = state; // Read configId from state parameter
 
     if (!code) {
       return res.status(400).json({ message: 'Authorization code is required' });
+    }
+
+    if (!configId) {
+      return res.status(400).json({ message: 'State (configId) is required' });
     }
 
     const config = getOidcConfigById(configId);
