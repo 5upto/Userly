@@ -141,6 +141,24 @@ const initDatabase = async () => {
       }
     }
 
+    // Create OIDC configs table for OpenID Connect SSO
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS oidc_configs (
+        id SERIAL PRIMARY KEY,
+        oidc_name VARCHAR(255) NOT NULL,
+        allowed_domains TEXT,
+        issuer_url TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        client_secret TEXT NOT NULL,
+        callback_url TEXT NOT NULL,
+        scope TEXT DEFAULT 'openid profile email',
+        response_type TEXT DEFAULT 'code',
+        enabled BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
     // Set supto.shawon2002@gmail.com as Super Admin
     await client.query(`
       UPDATE users 

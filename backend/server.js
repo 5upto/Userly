@@ -8,6 +8,7 @@ const { initDatabase } = require('./config/database');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const samlRoutes = require('./routes/saml');
+const oidcRoutes = require('./routes/oidc');
 const { startUserStatusPolling } = require('./services/graphApi');
 
 const app = express();
@@ -23,6 +24,13 @@ app.use(limiter);
 
 // Allow CORS for SAML routes (IdP posts from its own domain) - must be before global CORS
 app.use('/api/saml', cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Allow CORS for OIDC routes
+app.use('/api/oidc', cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -55,6 +63,7 @@ app.use(express.static(path.join(__dirname, '../frontend/dist')));
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/saml', samlRoutes);
+app.use('/api/oidc', oidcRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ message: 'Server is running', timestamp: new Date().toISOString() });
