@@ -427,20 +427,41 @@ router.get('/callback', async (req, res) => {
     const tokens = await exchangeCodeForToken(code, config, validation.discovery, callbackUrl);
     console.log('Tokens received:', { hasAccessToken: !!tokens.access_token, hasIdToken: !!tokens.id_token });
     
+    // Decode ID token to get UPN (often included in ID token even if not in userinfo)
+    let idTokenClaims = {};
+    if (tokens.id_token) {
+      try {
+        const parts = tokens.id_token.split('.');
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+        idTokenClaims = payload;
+        console.log('ID token claims:', idTokenClaims);
+      } catch (e) {
+        console.error('Failed to decode ID token:', e);
+      }
+    }
+    
     // Get user info
     console.log('Fetching user info from:', validation.discovery.userinfo_endpoint);
     const userInfo = await getUserInfo(tokens.access_token, validation.discovery.userinfo_endpoint);
     console.log('User info received:', userInfo);
+    console.log('User info keys:', Object.keys(userInfo));
     
-    // Try to get email from various fields, fallback to UPN
-    const email = userInfo.email || 
+    // Try to get email from various fields - check ID token first, then userinfo
+    const email = idTokenClaims.upn || 
+                 idTokenClaims.email ||
+                 idTokenClaims.preferred_username ||
+                 userInfo.email || 
                  userInfo.emails?.[0]?.value || 
                  userInfo.upn ||
-                 userInfo.preferred_username;
+                 userInfo.preferred_username ||
+                 userInfo.user_principal_name ||
+                 userInfo.unique_name ||
+                 userInfo.name;
     if (!email) {
-      console.error('No email or UPN in user info:', userInfo);
+      console.error('No email, UPN, or other identifier in user info:', userInfo);
       return res.status(400).json({ message: 'No email or UPN in user info' });
     }
+    console.log('Using identifier as email:', email);
 
     // Check if user exists
     const { rows: existingUsers } = await pool.query(
