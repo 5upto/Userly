@@ -432,10 +432,14 @@ router.get('/callback', async (req, res) => {
     const userInfo = await getUserInfo(tokens.access_token, validation.discovery.userinfo_endpoint);
     console.log('User info received:', userInfo);
     
-    const email = userInfo.email || userInfo.emails?.[0]?.value;
+    // Try to get email from various fields, fallback to UPN
+    const email = userInfo.email || 
+                 userInfo.emails?.[0]?.value || 
+                 userInfo.upn ||
+                 userInfo.preferred_username;
     if (!email) {
-      console.error('No email in user info:', userInfo);
-      return res.status(400).json({ message: 'No email in user info' });
+      console.error('No email or UPN in user info:', userInfo);
+      return res.status(400).json({ message: 'No email or UPN in user info' });
     }
 
     // Check if user exists
