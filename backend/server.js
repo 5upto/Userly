@@ -57,9 +57,6 @@ app.use((req, res, next) => {
   next();
 });
 
-const path = require('path');
-app.use(express.static(path.join(__dirname, '../frontend/dist')));
-
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/saml', samlRoutes);
@@ -72,10 +69,6 @@ app.get('/api/health', (req, res) => {
 app.use((err, req, res, next) => {
   console.error(err.stack);
   res.status(500).json({ message: 'Something went wrong!' });
-});
-
-app.get(/^\/(?!api).*/, (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
 });
 
 const startServer = async () => {
