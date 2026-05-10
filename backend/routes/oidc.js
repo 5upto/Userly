@@ -466,15 +466,21 @@ router.get('/callback', async (req, res) => {
 
     // Check user status in Entra BEFORE allowing login (pre-login check)
     try {
-      const entraStatus = await checkUserStatusInEntra(email);
+      const tenantInfo = await findUserAndGetToken(email);
+      if (!tenantInfo || !tenantInfo.token) {
+        // If we can't get a token (e.g., application disabled), treat as blocked
+        console.log(`User ${email} - unable to get Graph token (application may be disabled), denying login`);
+        return res.redirect(`${process.env.FRONTEND_URL || 'https://userly-pro.vercel.app'}/login?blocked=true&reason=entra_blocked`);
+      }
+
+      const entraStatus = await checkUserStatusInEntra(email, tenantInfo.token);
       if (entraStatus && entraStatus.blocked) {
         console.log(`User ${email} is BLOCKED in Entra, denying login`);
         return res.redirect(`${process.env.FRONTEND_URL || 'https://userly-pro.vercel.app'}/login?blocked=true&reason=entra_blocked`);
       }
 
       // Check security group membership BEFORE allowing login (pre-login check)
-      const tenantInfo = await findUserAndGetToken(email);
-      if (tenantInfo && tenantInfo.config?.security_group_id) {
+      if (tenantInfo.config?.security_group_id) {
         const appAccess = await checkUserAppAccess(email, tenantInfo.config.security_group_id, tenantInfo.token);
         if (appAccess && !appAccess.hasAccess) {
           console.log(`User ${email} does not have security group access, denying login`);
@@ -482,13 +488,14 @@ router.get('/callback', async (req, res) => {
         }
       }
     } catch (error) {
-      // If Graph API call fails due to user being disabled/blocked, treat as blocked
-      if (error.message && error.message.includes('disabled')) {
-        console.log(`User ${email} appears to be disabled in Entra (Graph API error), denying login`);
+      // If Graph API call fails with authorization errors, treat as blocked
+      const errorMsg = error.message || error.toString() || '';
+      if (errorMsg.includes('disabled') || errorMsg.includes('Unauthorized') || errorMsg.includes('Authorization_IdentityDisabled')) {
+        console.log(`User ${email} appears to be disabled in Entra (Graph API error: ${errorMsg}), denying login`);
         return res.redirect(`${process.env.FRONTEND_URL || 'https://userly-pro.vercel.app'}/login?blocked=true&reason=entra_blocked`);
       }
       // For other errors, log but allow login (fail open)
-      console.error('Error during pre-login Entra status check:', error.message);
+      console.error('Error during pre-login Entra status check:', errorMsg);
     }
 
     // Check if user exists

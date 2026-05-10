@@ -61,7 +61,12 @@ async function getTenantGraphToken(tenantId, clientId, clientSecret) {
             resolve(response.access_token);
           } else {
             console.error(`Failed to get Graph token for tenant ${tenantId}:`, response);
-            reject(new Error('Failed to acquire Graph token'));
+            // If error is about disabled application, resolve null instead of rejecting
+            if (response.error && (response.error.includes('disabled') || response.error.includes('Unauthorized'))) {
+              resolve(null);
+            } else {
+              reject(new Error('Failed to acquire Graph token'));
+            }
           }
         } catch (e) {
           reject(e);
@@ -69,7 +74,15 @@ async function getTenantGraphToken(tenantId, clientId, clientSecret) {
       });
     });
 
-    req.on('error', reject);
+    req.on('error', (err) => {
+      // If error is about disabled application, resolve null instead of rejecting
+      if (err.message && (err.message.includes('disabled') || err.message.includes('Unauthorized'))) {
+        console.error(`Application disabled for tenant ${tenantId}, returning null token`);
+        resolve(null);
+      } else {
+        reject(err);
+      }
+    });
     req.write(postData);
     req.end();
   });
