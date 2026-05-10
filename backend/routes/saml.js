@@ -700,8 +700,14 @@ router.post('/acs', (req, res, next) => {
           if (err.name === 'AccountBlockedError') {
             return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=account_locked');
           }
-          const errorMsg = encodeURIComponent(err.message || 'Unknown error');
-          return res.redirect(`https://userly-pro.vercel.app/login?error=passport_error&details=${errorMsg}`);
+          // Check for Graph API errors in passport error
+          const errorMsg = err.message || err.toString() || JSON.stringify(err) || '';
+          if (errorMsg.includes('disabled') || errorMsg.includes('Unauthorized') || errorMsg.includes('Authorization_IdentityDisabled')) {
+            console.log('Graph API error in passport auth, redirecting to blocked page');
+            return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=entra_blocked');
+          }
+          const encodedErrorMsg = encodeURIComponent(err.message || 'Unknown error');
+          return res.redirect(`https://userly-pro.vercel.app/login?error=passport_error&details=${encodedErrorMsg}`);
         }
         if (!profile) {
           console.error('No profile returned from passport');
@@ -720,8 +726,14 @@ router.post('/acs', (req, res, next) => {
   } catch (error) {
     console.error('SAML ACS error:', error);
     console.error('Error stack:', error.stack);
-    const errorMsg = encodeURIComponent(error.message || 'Unknown error');
-    res.redirect(`https://userly-pro.vercel.app/login?error=acs_failed&details=${errorMsg}`);
+    const errorMsg = error.message || error.toString() || JSON.stringify(error) || '';
+    // Check for Graph API errors in ACS catch block
+    if (errorMsg.includes('disabled') || errorMsg.includes('Unauthorized') || errorMsg.includes('Authorization_IdentityDisabled')) {
+      console.log('Graph API error in ACS endpoint, redirecting to blocked page');
+      return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=entra_blocked');
+    }
+    const encodedErrorMsg = encodeURIComponent(error.message || 'Unknown error');
+    res.redirect(`https://userly-pro.vercel.app/login?error=acs_failed&details=${encodedErrorMsg}`);
   }
 });
 
@@ -759,13 +771,14 @@ async function handleSamlUser(profile, res, samlConfig) {
         }
       } catch (error) {
         // If Graph API call fails with authorization errors, treat as blocked
-        const errorMsg = error.message || error.toString() || '';
-        if (errorMsg.includes('disabled') || errorMsg.includes('Unauthorized') || errorMsg.includes('Authorization_IdentityDisabled')) {
-          console.log(`User ${email} appears to be disabled in Entra (Graph API error: ${errorMsg}), denying login`);
+        const errorMsg = error.message || error.toString() || JSON.stringify(error) || '';
+        console.error('Graph API error during pre-login check:', errorMsg);
+        if (errorMsg.includes('disabled') || errorMsg.includes('Unauthorized') || errorMsg.includes('Authorization_IdentityDisabled') || errorMsg.includes('401')) {
+          console.log(`User ${email} appears to be disabled in Entra (Graph API error), denying login`);
           return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=entra_blocked');
         }
         // For other errors, log but allow login (fail open)
-        console.error('Error during pre-login Entra status check:', errorMsg);
+        console.error('Non-auth error during pre-login Entra status check, allowing login:', errorMsg);
       }
     }
 

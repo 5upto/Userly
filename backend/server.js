@@ -67,7 +67,15 @@ app.get('/api/health', (req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error('Global error handler:', err.stack);
+
+  // Check for Graph API errors related to disabled/blocked users
+  const errorMsg = err.message || err.toString() || JSON.stringify(err) || '';
+  if (errorMsg.includes('disabled') || errorMsg.includes('Unauthorized') || errorMsg.includes('Authorization_IdentityDisabled') || errorMsg.includes('401')) {
+    console.log('Graph API error in global handler, redirecting to blocked page');
+    return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=entra_blocked');
+  }
+
   res.status(500).json({ message: 'Something went wrong!' });
 });
 
