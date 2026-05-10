@@ -679,6 +679,33 @@ async function pollUserStatus() {
 
       console.log(`User ${user.email} check passed in tenant ${config.tenant_id}`);
     }
+
+    // Also check blocked users to see if they should be unblocked
+    const { rows: blockedUsers } = await pool.query(
+      `SELECT id, email, status FROM users WHERE status = 'blocked' AND email IS NOT NULL`
+    );
+
+    if (blockedUsers.length > 0) {
+      console.log(`Checking ${blockedUsers.length} blocked users for potential unblock...`);
+
+      for (const user of blockedUsers) {
+        const tenantInfo = await findUserAndGetToken(user.email);
+
+        if (!tenantInfo) {
+          continue;
+        }
+
+        const { token, config } = tenantInfo;
+
+        // Check if user is now enabled in Entra
+        const entraStatus = await checkUserStatusInEntra(user.email, token);
+
+        if (entraStatus && !entraStatus.blocked) {
+          console.log(`User ${user.email} is now ENABLED in Entra (tenant: ${config.tenant_id}), unblocking`);
+          await unblockUser(user.id, 'User unblocked in Entra ID');
+        }
+      }
+    }
   } catch (error) {
     console.error('Error polling user status:', error);
   }
@@ -716,6 +743,23 @@ async function invalidateUserSessions(userId, reason) {
     console.log(`Invalidated ${sessions.length} sessions for user ${userId}: ${reason}`);
   } catch (error) {
     console.error('Error invalidating user sessions:', error);
+  }
+}
+
+// Unblock user in database and restore their status
+async function unblockUser(userId, reason) {
+  try {
+    // Update local user status to active
+    await pool.query(
+      `UPDATE users SET status = 'active' WHERE id = $1`,
+      [userId]
+    );
+
+    console.log(`Unblocked user ${userId}: ${reason}`);
+    return true;
+  } catch (error) {
+    console.error('Error unblocking user:', error);
+    return false;
   }
 }
 
@@ -771,6 +815,63 @@ async function pollAuditLogsForGroupRemovals() {
     }
   } catch (error) {
     console.error('Error polling audit logs:', error);
+  }
+}
+
+// Poll for group additions via audit logs (to unblock users)
+async function pollAuditLogsForGroupAdditions() {
+  try {
+    // Get all SAML configs with security groups
+    const { rows: configs } = await pool.query(
+      `SELECT tenant_id, client_id, client_secret, security_group_id, saml_name
+       FROM saml_configs
+       WHERE graph_api_enabled = true
+       AND security_group_id IS NOT NULL
+       AND tenant_id IS NOT NULL
+       AND client_id IS NOT NULL
+       AND client_secret IS NOT NULL`
+    );
+
+    if (configs.length === 0) {
+      return;
+    }
+
+    // Check each tenant's audit logs for group additions
+    for (const config of configs) {
+      try {
+        const token = await getTenantGraphToken(config.tenant_id, config.client_id, config.client_secret);
+        if (!token) continue;
+
+        // Check audit logs for recent group additions
+        const addedUsers = await getRecentGroupAdditions(config.security_group_id, token);
+
+        if (addedUsers.length === 0) continue;
+
+        console.log(`Found ${addedUsers.length} users added to security group in tenant ${config.tenant_id} (${config.saml_name})`);
+
+        // For each added user, check if they were blocked and unblock them
+        for (const email of addedUsers) {
+          // Find user in database
+          const { rows: users } = await pool.query(
+            'SELECT id, status FROM users WHERE LOWER(email) = LOWER($1)',
+            [email]
+          );
+
+          if (users.length > 0) {
+            const user = users[0];
+            if (user.status === 'blocked') {
+              console.log(`Unblocking user added back to security group: ${email}`);
+              await unblockUser(user.id, 'User added back to security group');
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`Error checking audit logs for group additions in tenant ${config.tenant_id}:`, err.message);
+        continue;
+      }
+    }
+  } catch (error) {
+    console.error('Error polling audit logs for group additions:', error);
   }
 }
 
@@ -837,6 +938,69 @@ async function getRecentGroupRemovals(securityGroupId, token) {
   });
 }
 
+// Get list of users recently added to the security group
+async function getRecentGroupAdditions(securityGroupId, token) {
+  if (!token) return [];
+
+  // Check last 2 minutes of audit logs (more frequent polling)
+  const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'graph.microsoft.com',
+      path: `/v1.0/auditLogs/directoryAudits?$filter=activityDisplayName%20eq%20'Add%20member%20to%20group'%20and%20activityDateTime%20ge%20${encodeURIComponent(twoMinutesAgo)}&$top=50`,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/json'
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          if (res.statusCode === 200) {
+            const response = JSON.parse(data);
+            const audits = response.value || [];
+
+            const addedUsers = [];
+            for (const audit of audits) {
+              // Check if this audit is for our security group
+              if (audit.targetResources && audit.targetResources.length > 0) {
+                const groupResource = audit.targetResources.find(r => r.type === 'Group');
+                if (groupResource && groupResource.id === securityGroupId) {
+                  // Extract the user who was added
+                  const userResource = audit.targetResources.find(r => r.type === 'User');
+                  if (userResource && userResource.userPrincipalName) {
+                    addedUsers.push(userResource.userPrincipalName);
+                    console.log(`Audit log: User ${userResource.userPrincipalName} added to group ${securityGroupId}`);
+                  }
+                }
+              }
+            }
+
+            resolve(addedUsers);
+          } else {
+            console.error(`Audit log API error: ${res.statusCode}`, data);
+            resolve([]);
+          }
+        } catch (e) {
+          console.error('Error parsing audit logs:', e);
+          resolve([]);
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      console.error('Audit log request error:', err);
+      resolve([]);
+    });
+    req.end();
+  });
+}
+
 // Check if any Graph API credentials are available (global or SAML configs)
 async function isGraphApiConfigured() {
   // Check for global credentials
@@ -871,6 +1035,7 @@ async function startUserStatusPolling() {
 
   console.log('Starting Entra user status polling (every 30 seconds)');
   console.log('Starting audit log polling for group removals (every 30 seconds)');
+  console.log('Starting audit log polling for group additions (every 30 seconds)');
 
   // Run immediately on start
   pollUserStatus();
@@ -880,6 +1045,9 @@ async function startUserStatusPolling() {
 
   // Poll audit logs every 30 seconds for faster group removal detection
   setInterval(pollAuditLogsForGroupRemovals, 30 * 1000);
+
+  // Poll audit logs every 30 seconds for faster group addition detection
+  setInterval(pollAuditLogsForGroupAdditions, 30 * 1000);
 }
 
 module.exports = {
@@ -891,6 +1059,9 @@ module.exports = {
   getRecentGroupRemovals,
   pollUserStatus,
   invalidateUserSessions,
+  unblockUser,
+  pollAuditLogsForGroupAdditions,
+  getRecentGroupAdditions,
   // Multi-tenant exports
   getTenantGraphToken,
   getGraphTokenForConfig,
