@@ -692,13 +692,14 @@ async function pollUserStatus() {
   }
 }
 
-// Invalidate all sessions for a user (log them out without blocking database status)
+// Invalidate Entra-related sessions for a user (SAML/OIDC only, not local login sessions)
 async function invalidateUserSessions(userId, reason) {
   try {
-    // Get user's active tokens (both SAML and OIDC)
+    // Get user's active Entra-related tokens (SAML and OIDC only)
     const { rows: sessions } = await pool.query(
       `SELECT token FROM user_sessions
-       WHERE user_id = $1 AND is_active = true`,
+       WHERE user_id = $1 AND is_active = true
+       AND auth_type IN ('saml', 'oidc')`,
       [userId]
     );
 
@@ -707,15 +708,15 @@ async function invalidateUserSessions(userId, reason) {
       blacklistToken(session.token, reason);
     }
 
-    // Mark sessions as inactive in DB (both SAML and OIDC)
+    // Mark Entra-related sessions as inactive in DB (SAML and OIDC only)
     await pool.query(
       `UPDATE user_sessions SET is_active = false, invalidated_at = NOW(),
        invalidated_reason = $2
-       WHERE user_id = $1`,
+       WHERE user_id = $1 AND auth_type IN ('saml', 'oidc')`,
       [userId, reason]
     );
 
-    console.log(`Invalidated ${sessions.length} sessions for user ${userId}: ${reason}`);
+    console.log(`Invalidated ${sessions.length} Entra sessions for user ${userId}: ${reason}`);
   } catch (error) {
     console.error('Error invalidating user sessions:', error);
   }
