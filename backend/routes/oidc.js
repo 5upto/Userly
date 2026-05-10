@@ -20,6 +20,7 @@ const {
   registerOidcSession,
   invalidateOidcSessions
 } = require('../services/oidcService');
+const { isUserBlocked } = require('../services/graphApi');
 
 // Load OIDC configs from database on startup
 loadOidcConfigsFromDb();
@@ -463,6 +464,12 @@ router.get('/callback', async (req, res) => {
     }
     console.log('Using identifier as email:', email);
 
+    // Fast cache-based check for blocked users
+    const blocked = await isUserBlocked(email);
+    if (blocked) {
+      return res.status(403).json({ message: 'Account is blocked' });
+    }
+
     // Check if user exists
     const { rows: existingUsers } = await pool.query(
       'SELECT id, name, email, status, role FROM users WHERE email = $1',
@@ -473,6 +480,7 @@ router.get('/callback', async (req, res) => {
     if (existingUsers.length > 0) {
       user = existingUsers[0];
       
+      // Double-check status from database (cache-first check already done above)
       if (user.status === 'blocked') {
         return res.status(403).json({ message: 'Account is blocked' });
       }

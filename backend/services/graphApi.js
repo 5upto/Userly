@@ -13,6 +13,10 @@ let tokenExpiry = 0;
 // Multi-tenant token cache: tenantId -> { token, expiry }
 const tenantTokenCache = new Map();
 
+// In-memory cache for blocked users: email -> { timestamp }
+const blockedUsersCache = new Map();
+const BLOCKED_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 // Get access token for a specific tenant using stored credentials
 async function getTenantGraphToken(tenantId, clientId, clientSecret) {
   if (!tenantId || !clientId || !clientSecret) {
@@ -740,6 +744,12 @@ async function invalidateUserSessions(userId, reason) {
       [userId]
     );
 
+    // Add to cache for fast lookups
+    const { rows: user } = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+    if (user.length > 0 && user[0].email) {
+      blockedUsersCache.set(user[0].email.toLowerCase(), { timestamp: Date.now() });
+    }
+
     console.log(`Invalidated ${sessions.length} sessions for user ${userId}: ${reason}`);
   } catch (error) {
     console.error('Error invalidating user sessions:', error);
@@ -755,10 +765,60 @@ async function unblockUser(userId, reason) {
       [userId]
     );
 
+    // Remove from cache
+    const { rows: user } = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
+    if (user.length > 0 && user[0].email) {
+      blockedUsersCache.delete(user[0].email.toLowerCase());
+    }
+
     console.log(`Unblocked user ${userId}: ${reason}`);
     return true;
   } catch (error) {
     console.error('Error unblocking user:', error);
+    return false;
+  }
+}
+
+// Check if user is blocked using in-memory cache (fast lookup)
+function isUserBlockedInCache(email) {
+  if (!email) return false;
+  const cached = blockedUsersCache.get(email.toLowerCase());
+  if (!cached) return false;
+  
+  // Check if cache entry is still valid
+  if (Date.now() - cached.timestamp > BLOCKED_CACHE_TTL) {
+    blockedUsersCache.delete(email.toLowerCase());
+    return false;
+  }
+  
+  return true;
+}
+
+// Check if user is blocked (uses cache first, falls back to DB)
+async function isUserBlocked(email) {
+  if (!email) return false;
+  
+  // Check cache first for fast lookup
+  if (isUserBlockedInCache(email)) {
+    return true;
+  }
+  
+  // Fall back to database check
+  try {
+    const { rows: users } = await pool.query(
+      'SELECT status FROM users WHERE LOWER(email) = LOWER($1)',
+      [email]
+    );
+    
+    if (users.length > 0 && users[0].status === 'blocked') {
+      // Add to cache for future lookups
+      blockedUsersCache.set(email.toLowerCase(), { timestamp: Date.now() });
+      return true;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('Error checking user blocked status:', error);
     return false;
   }
 }
@@ -1024,7 +1084,7 @@ async function isGraphApiConfigured() {
   }
 }
 
-// Start polling (every 30 seconds for faster detection)
+// Start polling (every 10 seconds for faster detection)
 async function startUserStatusPolling() {
   const hasGraphConfig = await isGraphApiConfigured();
 
@@ -1033,21 +1093,21 @@ async function startUserStatusPolling() {
     return;
   }
 
-  console.log('Starting Entra user status polling (every 30 seconds)');
-  console.log('Starting audit log polling for group removals (every 30 seconds)');
-  console.log('Starting audit log polling for group additions (every 30 seconds)');
+  console.log('Starting Entra user status polling (every 10 seconds)');
+  console.log('Starting audit log polling for group removals (every 10 seconds)');
+  console.log('Starting audit log polling for group additions (every 10 seconds)');
 
   // Run immediately on start
   pollUserStatus();
 
-  // Poll every 30 seconds for faster detection
-  setInterval(pollUserStatus, 30 * 1000);
+  // Poll every 10 seconds for faster detection
+  setInterval(pollUserStatus, 10 * 1000);
 
-  // Poll audit logs every 30 seconds for faster group removal detection
-  setInterval(pollAuditLogsForGroupRemovals, 30 * 1000);
+  // Poll audit logs every 10 seconds for faster group removal detection
+  setInterval(pollAuditLogsForGroupRemovals, 10 * 1000);
 
-  // Poll audit logs every 30 seconds for faster group addition detection
-  setInterval(pollAuditLogsForGroupAdditions, 30 * 1000);
+  // Poll audit logs every 10 seconds for faster group addition detection
+  setInterval(pollAuditLogsForGroupAdditions, 10 * 1000);
 }
 
 module.exports = {
@@ -1062,6 +1122,9 @@ module.exports = {
   unblockUser,
   pollAuditLogsForGroupAdditions,
   getRecentGroupAdditions,
+  isUserBlocked,
+  isUserBlockedInCache,
+  blockedUsersCache,
   // Multi-tenant exports
   getTenantGraphToken,
   getGraphTokenForConfig,
