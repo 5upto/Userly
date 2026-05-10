@@ -746,6 +746,8 @@ async function handleSamlUser(profile, res, samlConfig) {
     console.log('Using SAML config:', samlConfig ? { id: samlConfig.id, name: samlConfig.saml_name, tenant_id: samlConfig.tenant_id } : 'none');
 
     // Check user status in Entra BEFORE allowing login (pre-login check)
+    // TEMPORARILY DISABLED to test if error is from here or elsewhere
+    /*
     if (samlConfig && samlConfig.graph_api_enabled) {
       try {
         const tenantInfo = await findUserAndGetToken(email);
@@ -781,6 +783,7 @@ async function handleSamlUser(profile, res, samlConfig) {
         console.error('Non-auth error during pre-login Entra status check, allowing login:', errorMsg);
       }
     }
+    */
 
     // Check if user exists
     const { rows: existingUsers } = await pool.query(
