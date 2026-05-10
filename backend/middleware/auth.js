@@ -86,44 +86,50 @@ const authenticateToken = async (req, res, next) => {
         if (!graphToken) {
           console.log(`No Graph API token available for ${user.email}, skipping real-time check`);
         } else {
-          // Check 1: Is user blocked in Entra?
-          const entraStatus = await checkUserStatusInEntra(user.email, graphToken);
+          // Only perform Entra checks for SAML/OIDC tokens, not local login tokens
+          const authType = decoded.authType;
+          if (authType !== 'saml' && authType !== 'oidc') {
+            console.log(`Skipping Entra checks for local login token (authType: ${authType})`);
+          } else {
+            // Check 1: Is user blocked in Entra?
+            const entraStatus = await checkUserStatusInEntra(user.email, graphToken);
 
-          if (entraStatus && entraStatus.blocked) {
-            console.log(`Real-time block detected for ${user.email} in Entra`);
-
-            // Blacklist current token with reason
-            blacklistToken(token, 'User blocked in Entra ID');
-
-            // Update local user status
-            await pool.query('UPDATE users SET status = $1 WHERE id = $2', ['blocked', user.id]);
-
-            return res.status(403).json({
-              message: 'Account blocked in Entra ID',
-              redirect: true,
-              reason: 'blocked'
-            });
-          }
-
-          // Check 2: Real-time check - is user still in their tenant's security group?
-          const securityGroupId = effectiveConfig?.security_group_id;
-          if (securityGroupId) {
-            const membership = await checkUserGroupMembership(user.email, securityGroupId, graphToken);
-            if (membership && !membership.isMember) {
-              console.log(`Real-time: User ${user.email} not in security group ${securityGroupId}`);
+            if (entraStatus && entraStatus.blocked) {
+              console.log(`Real-time block detected for ${user.email} in Entra`);
 
               // Blacklist current token with reason
-              blacklistToken(token, 'User removed from security group');
+              blacklistToken(token, 'User blocked in Entra ID');
 
-              // Update local user status
+              // Update local user status (only for Entra auth users)
               await pool.query('UPDATE users SET status = $1 WHERE id = $2', ['blocked', user.id]);
 
               return res.status(403).json({
-                message: 'Access revoked: User removed from security group',
+                message: 'Account blocked in Entra ID',
                 redirect: true,
-                forceReauth: true,
-                reason: 'security_group'
+                reason: 'blocked'
               });
+            }
+
+            // Check 2: Real-time check - is user still in their tenant's security group?
+            const securityGroupId = effectiveConfig?.security_group_id;
+            if (securityGroupId) {
+              const membership = await checkUserGroupMembership(user.email, securityGroupId, graphToken);
+              if (membership && !membership.isMember) {
+                console.log(`Real-time: User ${user.email} not in security group ${securityGroupId}`);
+
+                // Blacklist current token with reason
+                blacklistToken(token, 'User removed from security group');
+
+                // Don't update database status for security group removal (per discussion - just invalidate sessions)
+                // await pool.query('UPDATE users SET status = $1 WHERE id = $2', ['blocked', user.id]);
+
+                return res.status(403).json({
+                  message: 'Access revoked: User removed from security group',
+                  redirect: true,
+                  forceReauth: true,
+                  reason: 'security_group'
+                });
+              }
             }
           }
         }
