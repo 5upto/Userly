@@ -9,7 +9,7 @@ const SamlStrategy = require('passport-saml').Strategy;
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
 const { authenticateToken, requireAdmin, blacklistToken } = require('../middleware/auth');
-const { checkUserStatusInEntra, findUserAndGetToken } = require('../services/graphApi');
+const { checkUserStatusInEntra, findUserAndGetToken, checkUserAppAccess } = require('../services/graphApi');
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../uploads');
@@ -741,6 +741,15 @@ async function handleSamlUser(profile, res, samlConfig) {
         if (entraStatus && entraStatus.blocked) {
           console.log(`User ${email} is BLOCKED in Entra, denying login`);
           return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=entra_blocked');
+        }
+
+        // Check security group membership BEFORE allowing login (pre-login check)
+        if (samlConfig.security_group_id) {
+          const appAccess = await checkUserAppAccess(email, samlConfig.security_group_id, tenantInfo.token);
+          if (appAccess && !appAccess.hasAccess) {
+            console.log(`User ${email} does not have security group access, denying login`);
+            return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=no_group_access');
+          }
         }
       }
     }

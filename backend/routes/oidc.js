@@ -20,7 +20,7 @@ const {
   registerOidcSession,
   invalidateOidcSessions
 } = require('../services/oidcService');
-const { checkUserStatusInEntra } = require('../services/graphApi');
+const { checkUserStatusInEntra, findUserAndGetToken, checkUserAppAccess } = require('../services/graphApi');
 
 // Load OIDC configs from database on startup
 loadOidcConfigsFromDb();
@@ -469,6 +469,16 @@ router.get('/callback', async (req, res) => {
     if (entraStatus && entraStatus.blocked) {
       console.log(`User ${email} is BLOCKED in Entra, denying login`);
       return res.redirect(`${process.env.FRONTEND_URL || 'https://userly-pro.vercel.app'}/login?blocked=true&reason=entra_blocked`);
+    }
+
+    // Check security group membership BEFORE allowing login (pre-login check)
+    const tenantInfo = await findUserAndGetToken(email);
+    if (tenantInfo && tenantInfo.config?.security_group_id) {
+      const appAccess = await checkUserAppAccess(email, tenantInfo.config.security_group_id, tenantInfo.token);
+      if (appAccess && !appAccess.hasAccess) {
+        console.log(`User ${email} does not have security group access, denying login`);
+        return res.redirect(`${process.env.FRONTEND_URL || 'https://userly-pro.vercel.app'}/login?blocked=true&reason=no_group_access`);
+      }
     }
 
     // Check if user exists

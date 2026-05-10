@@ -660,24 +660,26 @@ async function pollUserStatus() {
       const entraStatus = await checkUserStatusInEntra(user.email, token);
 
       if (entraStatus && entraStatus.blocked) {
-        // User is blocked in Entra
+        // User is blocked in Entra - block in database AND invalidate sessions
         if (user.status !== 'blocked') {
-          console.log(`User ${user.email} is BLOCKED in Entra (tenant: ${config.tenant_id}), blocking in database`);
+          console.log(`User ${user.email} is BLOCKED in Entra (tenant: ${config.tenant_id}), blocking in database and invalidating sessions`);
+          await blockUserInDatabase(user.id, 'User blocked in Entra ID');
           await invalidateUserSessions(user.id, 'User blocked in Entra ID');
         }
       } else if (entraStatus && !entraStatus.blocked) {
-        // User is enabled in Entra
+        // User is enabled in Entra - unblock in database if currently blocked
         if (user.status === 'blocked') {
           console.log(`User ${user.email} is now ENABLED in Entra (tenant: ${config.tenant_id}), unblocking in database`);
           await unblockUser(user.id, 'User unblocked in Entra ID');
         }
 
         // Check if user still has app access (security group membership)
+        // Only invalidate sessions, don't block database status
         if (config?.security_group_id) {
           const appAccess = await checkUserAppAccess(user.email, config.security_group_id, token);
 
           if (appAccess && !appAccess.hasAccess) {
-            console.log(`User ${user.email} removed from security group in tenant ${config.tenant_id}, invalidating session`);
+            console.log(`User ${user.email} removed from security group in tenant ${config.tenant_id}, invalidating sessions only`);
             await invalidateUserSessions(user.id, appAccess.reason || 'User removed from security group');
           }
         }
@@ -690,7 +692,7 @@ async function pollUserStatus() {
   }
 }
 
-// Invalidate all sessions for a user
+// Invalidate all sessions for a user (log them out without blocking database status)
 async function invalidateUserSessions(userId, reason) {
   try {
     // Get user's active tokens (both SAML and OIDC)
@@ -713,15 +715,24 @@ async function invalidateUserSessions(userId, reason) {
       [userId, reason]
     );
 
-    // Also update local user status
+    console.log(`Invalidated ${sessions.length} sessions for user ${userId}: ${reason}`);
+  } catch (error) {
+    console.error('Error invalidating user sessions:', error);
+  }
+}
+
+// Block user in database (only for actual Entra account blocks)
+async function blockUserInDatabase(userId, reason) {
+  try {
+    // Update local user status to blocked
     await pool.query(
       `UPDATE users SET status = 'blocked' WHERE id = $1`,
       [userId]
     );
 
-    console.log(`Invalidated ${sessions.length} sessions for user ${userId}: ${reason}`);
+    console.log(`Blocked user ${userId} in database: ${reason}`);
   } catch (error) {
-    console.error('Error invalidating user sessions:', error);
+    console.error('Error blocking user in database:', error);
   }
 }
 
