@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
-const { checkUserStatusInEntra, checkUserGroupMembership, getTenantGraphToken, findUserAndGetToken, isUserBlocked } = require('../services/graphApi');
+const { checkUserStatusInEntra, checkUserGroupMembership, getTenantGraphToken, findUserAndGetToken } = require('../services/graphApi');
 const { isTokenBlacklisted, blacklistToken } = require('../services/tokenBlacklist');
 
 const authenticateToken = async (req, res, next) => {
@@ -25,16 +25,6 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-key');
-    
-    // Fast cache-based check for blocked users (immediate rejection without DB query)
-    const blocked = await isUserBlocked(decoded.email);
-    if (blocked) {
-      return res.status(403).json({
-        message: 'Account is blocked',
-        redirect: true,
-        reason: 'blocked'
-      });
-    }
     
     const { rows: users } = await pool.query(
       'SELECT id, email, name, status, role FROM users WHERE id = $1',

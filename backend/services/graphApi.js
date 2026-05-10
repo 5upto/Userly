@@ -13,10 +13,6 @@ let tokenExpiry = 0;
 // Multi-tenant token cache: tenantId -> { token, expiry }
 const tenantTokenCache = new Map();
 
-// In-memory cache for blocked users: email -> { timestamp }
-const blockedUsersCache = new Map();
-const BLOCKED_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
 // Get access token for a specific tenant using stored credentials
 async function getTenantGraphToken(tenantId, clientId, clientSecret) {
   if (!tenantId || !clientId || !clientSecret) {
@@ -636,23 +632,21 @@ async function findUserAndGetToken(email) {
 // Poll all SAML users and invalidate sessions of blocked/revoked users
 async function pollUserStatus() {
   try {
-    // Get ALL SAML users (not just recent ones) to ensure continuous monitoring
-    const { rows: samlUsers } = await pool.query(
+    // Get all active SAML users from our database
+    const { rows: activeUsers } = await pool.query(
       `SELECT DISTINCT u.id, u.email, u.status
        FROM users u
        JOIN user_sessions us ON u.id = us.user_id
        WHERE us.auth_type = 'saml'
-       AND u.email IS NOT NULL`
+       AND us.is_active = true
+       AND us.created_at > NOW() - INTERVAL '24 hours'`
     );
 
-    if (samlUsers.length === 0) {
-      console.log('No SAML users found to poll');
-      return;
-    }
+    if (activeUsers.length === 0) return;
 
-    console.log(`Polling ${samlUsers.length} SAML users against Entra...`);
+    console.log(`Polling ${activeUsers.length} active SAML users against Entra...`);
 
-    for (const user of samlUsers) {
+    for (const user of activeUsers) {
       // Find user across all configured tenants
       const tenantInfo = await findUserAndGetToken(user.email);
 
@@ -667,11 +661,8 @@ async function pollUserStatus() {
       const entraStatus = await checkUserStatusInEntra(user.email, token);
 
       if (entraStatus && entraStatus.blocked) {
-        // Only block if not already blocked in database
-        if (user.status !== 'blocked') {
-          console.log(`User ${user.email} is BLOCKED in Entra (tenant: ${config.tenant_id}), invalidating session`);
-          await invalidateUserSessions(user.id, 'User blocked in Entra ID');
-        }
+        console.log(`User ${user.email} is BLOCKED in Entra (tenant: ${config.tenant_id}), invalidating session`);
+        await invalidateUserSessions(user.id, 'User blocked in Entra ID');
         continue;
       }
 
@@ -680,11 +671,8 @@ async function pollUserStatus() {
         const appAccess = await checkUserAppAccess(user.email, config.security_group_id, token);
 
         if (appAccess && !appAccess.hasAccess) {
-          // Only block if not already blocked in database
-          if (user.status !== 'blocked') {
-            console.log(`User ${user.email} removed from security group in tenant ${config.tenant_id}, invalidating session`);
-            await invalidateUserSessions(user.id, appAccess.reason || 'User removed from security group');
-          }
+          console.log(`User ${user.email} removed from security group in tenant ${config.tenant_id}, invalidating session`);
+          await invalidateUserSessions(user.id, appAccess.reason || 'User removed from security group');
           continue;
         }
       }
@@ -752,12 +740,6 @@ async function invalidateUserSessions(userId, reason) {
       [userId]
     );
 
-    // Add to cache for fast lookups
-    const { rows: user } = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
-    if (user.length > 0 && user[0].email) {
-      blockedUsersCache.set(user[0].email.toLowerCase(), { timestamp: Date.now() });
-    }
-
     console.log(`Invalidated ${sessions.length} sessions for user ${userId}: ${reason}`);
   } catch (error) {
     console.error('Error invalidating user sessions:', error);
@@ -773,60 +755,10 @@ async function unblockUser(userId, reason) {
       [userId]
     );
 
-    // Remove from cache
-    const { rows: user } = await pool.query('SELECT email FROM users WHERE id = $1', [userId]);
-    if (user.length > 0 && user[0].email) {
-      blockedUsersCache.delete(user[0].email.toLowerCase());
-    }
-
     console.log(`Unblocked user ${userId}: ${reason}`);
     return true;
   } catch (error) {
     console.error('Error unblocking user:', error);
-    return false;
-  }
-}
-
-// Check if user is blocked using in-memory cache (fast lookup)
-function isUserBlockedInCache(email) {
-  if (!email) return false;
-  const cached = blockedUsersCache.get(email.toLowerCase());
-  if (!cached) return false;
-  
-  // Check if cache entry is still valid
-  if (Date.now() - cached.timestamp > BLOCKED_CACHE_TTL) {
-    blockedUsersCache.delete(email.toLowerCase());
-    return false;
-  }
-  
-  return true;
-}
-
-// Check if user is blocked (uses cache first, falls back to DB)
-async function isUserBlocked(email) {
-  if (!email) return false;
-  
-  // Check cache first for fast lookup
-  if (isUserBlockedInCache(email)) {
-    return true;
-  }
-  
-  // Fall back to database check
-  try {
-    const { rows: users } = await pool.query(
-      'SELECT status FROM users WHERE LOWER(email) = LOWER($1)',
-      [email]
-    );
-    
-    if (users.length > 0 && users[0].status === 'blocked') {
-      // Add to cache for future lookups
-      blockedUsersCache.set(email.toLowerCase(), { timestamp: Date.now() });
-      return true;
-    }
-    
-    return false;
-  } catch (error) {
-    console.error('Error checking user blocked status:', error);
     return false;
   }
 }
@@ -1092,7 +1024,7 @@ async function isGraphApiConfigured() {
   }
 }
 
-// Start polling (every 10 seconds for faster detection)
+// Start polling (every 30 seconds for faster detection)
 async function startUserStatusPolling() {
   const hasGraphConfig = await isGraphApiConfigured();
 
@@ -1101,21 +1033,21 @@ async function startUserStatusPolling() {
     return;
   }
 
-  console.log('Starting Entra user status polling (every 10 seconds)');
-  console.log('Starting audit log polling for group removals (every 10 seconds)');
-  console.log('Starting audit log polling for group additions (every 10 seconds)');
+  console.log('Starting Entra user status polling (every 30 seconds)');
+  console.log('Starting audit log polling for group removals (every 30 seconds)');
+  console.log('Starting audit log polling for group additions (every 30 seconds)');
 
   // Run immediately on start
   pollUserStatus();
 
-  // Poll every 10 seconds for faster detection
-  setInterval(pollUserStatus, 10 * 1000);
+  // Poll every 30 seconds for faster detection
+  setInterval(pollUserStatus, 30 * 1000);
 
-  // Poll audit logs every 10 seconds for faster group removal detection
-  setInterval(pollAuditLogsForGroupRemovals, 10 * 1000);
+  // Poll audit logs every 30 seconds for faster group removal detection
+  setInterval(pollAuditLogsForGroupRemovals, 30 * 1000);
 
-  // Poll audit logs every 10 seconds for faster group addition detection
-  setInterval(pollAuditLogsForGroupAdditions, 10 * 1000);
+  // Poll audit logs every 30 seconds for faster group addition detection
+  setInterval(pollAuditLogsForGroupAdditions, 30 * 1000);
 }
 
 module.exports = {
@@ -1130,9 +1062,6 @@ module.exports = {
   unblockUser,
   pollAuditLogsForGroupAdditions,
   getRecentGroupAdditions,
-  isUserBlocked,
-  isUserBlockedInCache,
-  blockedUsersCache,
   // Multi-tenant exports
   getTenantGraphToken,
   getGraphTokenForConfig,

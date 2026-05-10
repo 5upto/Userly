@@ -9,7 +9,6 @@ const SamlStrategy = require('passport-saml').Strategy;
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
 const { authenticateToken, requireAdmin, blacklistToken } = require('../middleware/auth');
-const { isUserBlocked } = require('../services/graphApi');
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../uploads');
@@ -138,22 +137,11 @@ const getSamlStrategy = (config) => {
         } else {
           // Update existing user's last login time
           user = existingUsers[0];
-          
-          // Fast cache-based check for blocked users
-          const blocked = await isUserBlocked(email);
-          if (blocked) {
-            const err = new Error('Account is blocked');
-            err.name = 'AccountBlockedError';
-            return done(err, null);
-          }
-          
-          // Double-check status from database (cache-first check already done above)
           if (user.status === 'blocked') {
             const err = new Error('Account is blocked');
             err.name = 'AccountBlockedError';
             return done(err, null);
           }
-          
           await pool.query(
             'UPDATE users SET last_login_time = NOW() WHERE id = $1',
             [user.id]
