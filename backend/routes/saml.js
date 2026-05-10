@@ -745,45 +745,8 @@ async function handleSamlUser(profile, res, samlConfig) {
     console.log('Extracted user info - email:', email, 'name:', name);
     console.log('Using SAML config:', samlConfig ? { id: samlConfig.id, name: samlConfig.saml_name, tenant_id: samlConfig.tenant_id } : 'none');
 
-    // Check user status in Entra BEFORE allowing login (pre-login check)
-    // TEMPORARILY DISABLED to test if error is from here or elsewhere
-    /*
-    if (samlConfig && samlConfig.graph_api_enabled) {
-      try {
-        const tenantInfo = await findUserAndGetToken(email);
-        if (!tenantInfo || !tenantInfo.token) {
-          // If we can't get a token (e.g., application disabled), treat as blocked
-          console.log(`User ${email} - unable to get Graph token (application may be disabled), denying login`);
-          return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=entra_blocked');
-        }
-
-        const entraStatus = await checkUserStatusInEntra(email, tenantInfo.token);
-        if (entraStatus && entraStatus.blocked) {
-          console.log(`User ${email} is BLOCKED in Entra, denying login`);
-          return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=entra_blocked');
-        }
-
-        // Check security group membership BEFORE allowing login (pre-login check)
-        if (samlConfig.security_group_id) {
-          const appAccess = await checkUserAppAccess(email, samlConfig.security_group_id, tenantInfo.token);
-          if (appAccess && !appAccess.hasAccess) {
-            console.log(`User ${email} does not have security group access, denying login`);
-            return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=no_group_access');
-          }
-        }
-      } catch (error) {
-        // If Graph API call fails with authorization errors, treat as blocked
-        const errorMsg = error.message || error.toString() || JSON.stringify(error) || '';
-        console.error('Graph API error during pre-login check:', errorMsg);
-        if (errorMsg.includes('disabled') || errorMsg.includes('Unauthorized') || errorMsg.includes('Authorization_IdentityDisabled') || errorMsg.includes('401')) {
-          console.log(`User ${email} appears to be disabled in Entra (Graph API error), denying login`);
-          return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=entra_blocked');
-        }
-        // For other errors, log but allow login (fail open)
-        console.error('Non-auth error during pre-login Entra status check, allowing login:', errorMsg);
-      }
-    }
-    */
+    // Graph API pre-login check disabled for SAML due to protocol-level errors
+// Rely on backend polling for blocking/unblocking instead
 
     // Check if user exists
     const { rows: existingUsers } = await pool.query(
