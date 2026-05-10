@@ -9,6 +9,7 @@ const SamlStrategy = require('passport-saml').Strategy;
 const jwt = require('jsonwebtoken');
 const { pool } = require('../config/database');
 const { authenticateToken, requireAdmin, blacklistToken } = require('../middleware/auth');
+const { checkUserStatusInEntra, findUserAndGetToken } = require('../services/graphApi');
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../uploads');
@@ -731,6 +732,18 @@ async function handleSamlUser(profile, res, samlConfig) {
 
     console.log('Extracted user info - email:', email, 'name:', name);
     console.log('Using SAML config:', samlConfig ? { id: samlConfig.id, name: samlConfig.saml_name, tenant_id: samlConfig.tenant_id } : 'none');
+
+    // Check user status in Entra BEFORE allowing login (pre-login check)
+    if (samlConfig && samlConfig.graph_api_enabled) {
+      const tenantInfo = await findUserAndGetToken(email);
+      if (tenantInfo) {
+        const entraStatus = await checkUserStatusInEntra(email, tenantInfo.token);
+        if (entraStatus && entraStatus.blocked) {
+          console.log(`User ${email} is BLOCKED in Entra, denying login`);
+          return res.redirect('https://userly-pro.vercel.app/login?blocked=true&reason=entra_blocked');
+        }
+      }
+    }
 
     // Check if user exists
     const { rows: existingUsers } = await pool.query(

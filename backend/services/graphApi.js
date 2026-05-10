@@ -632,21 +632,20 @@ async function findUserAndGetToken(email) {
 // Poll all SAML users and invalidate sessions of blocked/revoked users
 async function pollUserStatus() {
   try {
-    // Get all active SAML users from our database
-    const { rows: activeUsers } = await pool.query(
+    // Get ALL SAML and OIDC users from our database (not just active sessions)
+    const { rows: allUsers } = await pool.query(
       `SELECT DISTINCT u.id, u.email, u.status
        FROM users u
        JOIN user_sessions us ON u.id = us.user_id
-       WHERE us.auth_type = 'saml'
-       AND us.is_active = true
-       AND us.created_at > NOW() - INTERVAL '24 hours'`
+       WHERE (us.auth_type = 'saml' OR us.auth_type = 'oidc')
+       AND u.email IS NOT NULL`
     );
 
-    if (activeUsers.length === 0) return;
+    if (allUsers.length === 0) return;
 
-    console.log(`Polling ${activeUsers.length} active SAML users against Entra...`);
+    console.log(`Polling ${allUsers.length} SAML/OIDC users against Entra...`);
 
-    for (const user of activeUsers) {
+    for (const user of allUsers) {
       // Find user across all configured tenants
       const tenantInfo = await findUserAndGetToken(user.email);
 
@@ -657,54 +656,34 @@ async function pollUserStatus() {
 
       const { token, config } = tenantInfo;
 
-      // Check 1: Is user blocked/disabled in Entra?
+      // Check if user is blocked/disabled in Entra
       const entraStatus = await checkUserStatusInEntra(user.email, token);
 
       if (entraStatus && entraStatus.blocked) {
-        console.log(`User ${user.email} is BLOCKED in Entra (tenant: ${config.tenant_id}), invalidating session`);
-        await invalidateUserSessions(user.id, 'User blocked in Entra ID');
-        continue;
-      }
-
-      // Check 2: Does user still have app access (security group membership)?
-      if (config?.security_group_id) {
-        const appAccess = await checkUserAppAccess(user.email, config.security_group_id, token);
-
-        if (appAccess && !appAccess.hasAccess) {
-          console.log(`User ${user.email} removed from security group in tenant ${config.tenant_id}, invalidating session`);
-          await invalidateUserSessions(user.id, appAccess.reason || 'User removed from security group');
-          continue;
+        // User is blocked in Entra
+        if (user.status !== 'blocked') {
+          console.log(`User ${user.email} is BLOCKED in Entra (tenant: ${config.tenant_id}), blocking in database`);
+          await invalidateUserSessions(user.id, 'User blocked in Entra ID');
         }
-      }
-
-      console.log(`User ${user.email} check passed in tenant ${config.tenant_id}`);
-    }
-
-    // Also check blocked users to see if they should be unblocked
-    const { rows: blockedUsers } = await pool.query(
-      `SELECT id, email, status FROM users WHERE status = 'blocked' AND email IS NOT NULL`
-    );
-
-    if (blockedUsers.length > 0) {
-      console.log(`Checking ${blockedUsers.length} blocked users for potential unblock...`);
-
-      for (const user of blockedUsers) {
-        const tenantInfo = await findUserAndGetToken(user.email);
-
-        if (!tenantInfo) {
-          continue;
-        }
-
-        const { token, config } = tenantInfo;
-
-        // Check if user is now enabled in Entra
-        const entraStatus = await checkUserStatusInEntra(user.email, token);
-
-        if (entraStatus && !entraStatus.blocked) {
-          console.log(`User ${user.email} is now ENABLED in Entra (tenant: ${config.tenant_id}), unblocking`);
+      } else if (entraStatus && !entraStatus.blocked) {
+        // User is enabled in Entra
+        if (user.status === 'blocked') {
+          console.log(`User ${user.email} is now ENABLED in Entra (tenant: ${config.tenant_id}), unblocking in database`);
           await unblockUser(user.id, 'User unblocked in Entra ID');
         }
+
+        // Check if user still has app access (security group membership)
+        if (config?.security_group_id) {
+          const appAccess = await checkUserAppAccess(user.email, config.security_group_id, token);
+
+          if (appAccess && !appAccess.hasAccess) {
+            console.log(`User ${user.email} removed from security group in tenant ${config.tenant_id}, invalidating session`);
+            await invalidateUserSessions(user.id, appAccess.reason || 'User removed from security group');
+          }
+        }
       }
+
+      console.log(`User ${user.email} check completed in tenant ${config.tenant_id}`);
     }
   } catch (error) {
     console.error('Error polling user status:', error);
@@ -714,10 +693,10 @@ async function pollUserStatus() {
 // Invalidate all sessions for a user
 async function invalidateUserSessions(userId, reason) {
   try {
-    // Get user's active tokens
+    // Get user's active tokens (both SAML and OIDC)
     const { rows: sessions } = await pool.query(
       `SELECT token FROM user_sessions
-       WHERE user_id = $1 AND auth_type = 'saml' AND is_active = true`,
+       WHERE user_id = $1 AND is_active = true`,
       [userId]
     );
 
@@ -726,11 +705,11 @@ async function invalidateUserSessions(userId, reason) {
       blacklistToken(session.token, reason);
     }
 
-    // Mark sessions as inactive in DB
+    // Mark sessions as inactive in DB (both SAML and OIDC)
     await pool.query(
       `UPDATE user_sessions SET is_active = false, invalidated_at = NOW(),
        invalidated_reason = $2
-       WHERE user_id = $1 AND auth_type = 'saml'`,
+       WHERE user_id = $1`,
       [userId, reason]
     );
 

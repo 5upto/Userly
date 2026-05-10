@@ -20,6 +20,7 @@ const {
   registerOidcSession,
   invalidateOidcSessions
 } = require('../services/oidcService');
+const { checkUserStatusInEntra } = require('../services/graphApi');
 
 // Load OIDC configs from database on startup
 loadOidcConfigsFromDb();
@@ -463,6 +464,13 @@ router.get('/callback', async (req, res) => {
     }
     console.log('Using identifier as email:', email);
 
+    // Check user status in Entra BEFORE allowing login (pre-login check)
+    const entraStatus = await checkUserStatusInEntra(email);
+    if (entraStatus && entraStatus.blocked) {
+      console.log(`User ${email} is BLOCKED in Entra, denying login`);
+      return res.redirect(`${process.env.FRONTEND_URL || 'https://userly-pro.vercel.app'}/login?blocked=true&reason=entra_blocked`);
+    }
+
     // Check if user exists
     const { rows: existingUsers } = await pool.query(
       'SELECT id, name, email, status, role FROM users WHERE email = $1',
@@ -472,7 +480,7 @@ router.get('/callback', async (req, res) => {
     let user;
     if (existingUsers.length > 0) {
       user = existingUsers[0];
-      
+
       if (user.status === 'blocked') {
         return res.status(403).json({ message: 'Account is blocked' });
       }
